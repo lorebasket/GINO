@@ -1,0 +1,210 @@
+
+name: 4_NACA0015_PST
+description: Fem validation example, NACA0015 airfoil full span beam, SHanghai paper
+
+components:
+# ==== B L A D E ==== #
+    blade:
+        outer_shape_bem:
+            airfoil_position:
+                grid: [0.0, 0.3, 0.6, 0.75, 1.0]                              # radial stations in % (ovunque deve comparire lo stesso!)
+                labels: [NACA0015, NACA0015, NACA0015, NACA0015, NACA0015]    # airfoil labels, comes from the name of the airfoil (defined below)
+            chord:
+                grid: [0.0, 0.3, 0.6, 0.75, 1.0]
+                values: [0.144, 0.124, 0.1, 0.08, 0.08]                       # chord in m
+            twist:
+                grid: [0.0, 0.3, 0.6, 0.75, 1.0]
+                values: [0.0, 0.0, 0.0, 0.0, 0.0]                             # twist in deg ?!?!
+            pitch_axis:
+                grid: [0.0, 0.3, 0.6, 0.75, 1.0]
+                values: [0.325, 0.325, 0.31, 0.29838, 0.2979]                 # pitch/chord (chord value of the section)
+            
+            # x along the span, y along the chord, z along the thickness
+            # it can introduce rotation
+            reference_axis:
+                x:
+                    grid: [0.0, 0.3, 0.6, 0.75, 1.0]
+                    values: [0.0, 0.3, 0.6, 0.75, 1.0]                        # x-coordinate of the reference axis in m
+                y:
+                    grid: [0.0, 0.3, 0.6, 0.75, 1.0]
+                    values: [0.0, 0.2, 0.2, 0.2, 0.4]                         # y-coordinate of the reference axis in m
+                z:
+                    grid: [0.0, 0.3, 0.6, 0.75, 1.0]
+                    values: [0.0, 0.0, 0.0, 0.0, 0.0]                         # z-coordinate of the reference axis in m
+            
+            # definition of the point where the properties are calculated from
+            beam_reference_axis:
+                x:
+                    grid: [0.0, 0.3, 0.6, 0.75, 1.0]
+                    values: [0.0, 0.3, 0.6, 0.75, 1.0]
+                y:
+                    grid: [0.0, 0.3, 0.6, 0.75, 1.0]
+                    values: [0.0, 0.0, 0.0, 0.0, 0.0]
+                z:
+                    grid: [0.0, 0.3, 0.6, 0.75, 1.0]
+                    values: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+# ==== I N T E R N A L S T R U C T U R E ==== #
+        internal_structure_2d_fem:
+            sections:
+              # for a consistent lamination, there must be a stacking sequence for each radial station
+
+              # --- r/R = 0.0 ---
+              - position: 0.0
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: Null     # if Null (no filler), if int (material id)
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+
+              # --- r/R = 0.3 ---
+              - position: 0.3
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: Null
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+
+
+              # --- r/R = 0.6 ---
+              - position: 0.6
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: Null
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+
+              
+              # --- r/R = 0.75 ---
+              - position: 0.75
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: Null
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+            
+              
+              # --- r/R = 1.0 ---
+              - position: 1.0
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: Null
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.00026, 90, 3, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+                      - [0., 1., 0.0004, 45, 2, 'wall']
+
+
+
+# ==== A I R F O I L S ==== #
+airfoils:
+   -  name: NACA0015
+      coordinates: # follow s-coordinate along the outer profile of the structure, in SI units - m - unitary chord - from TE to LE and back to TE
+           x: [1.0000, 0.9500, 0.9000, 0.8000, 0.7000, 0.6000, 0.5000, 0.4000, 0.3000, 0.2500, 0.2000, 0.1500, 0.1000, 0.0750, 0.0500, 0.0250, 0.0125, 0.0000, 0.0125, 0.0250, 0.0500, 0.0750, 0.1000, 0.1500, 0.2000, 0.2500, 0.3000, 0.4000, 0.5000, 0.6000, 0.7000, 0.8000, 0.9000, 0.9500, 1.0000]
+           y: [0.00158, 0.01008, 0.01810, 0.03279, 0.04580, 0.05704, 0.06617, 0.07254, 0.07502, 0.07427, 0.07172, 0.06682, 0.05853, 0.05250, 0.04443, 0.03268, 0.02367, 0.00000, -0.02367, -0.03268,-0.04443, -0.05250, -0.05853, -0.06682, -0.07172, -0.07427, -0.07502, -0.07254, -0.06617, -0.05704, -0.04580, -0.03279, -0.01810, -0.01008, -0.00158]
+
+
+# ==== M A T E R I A L S ==== #
+materials:
+  # must be defined with id number starting from 1
+  # units in SI
+
+  - id: 1                                    # important, used as reference for the stacking sequence
+    name: steel                              # optional
+    description: Steel (isotropic material)  # "" 
+    orth: 0                                  # 0 if isotropic, 1 if orthotropic
+    rho: 7800                                # kg/m³
+    E: 210e9                                 # Young's modulus in Pa
+    G: 80.77e9                               # Shear modulus in Pa
+    nu: 0.3                                  # Poisson's ratio
+
+  - id: 2
+    name: BIAX
+    description: basalto
+    source: Campagna provini
+    orth: 1
+    rho: 1e-9
+    E_1: 31449e6
+    E_2: 31449e6
+    E_3: 31449e6
+    G_12: 20404e6
+    G_13: 20404e6
+    G_23: 20404e6
+    nu_12: 0.152
+    nu_13: 0.152
+    nu_23: 0.152
+    alpha_11:  Null
+    alpha_22:  Null
+    alpha_33:  Null
+
+  - id: 3
+    name: UD
+    description: basalto
+    source: Campagna provini
+    orth: 1
+    rho: 1e-9
+    E_1: 36115e6
+    E_2: 8712e6
+    E_3: 8712e6
+    G_12: 16715e6
+    G_13: 16715e6
+    G_23: 16715e6
+    nu_12: 0.322
+    nu_13: 0.322
+    nu_23: 0.322
+    alpha_11:  Null
+    alpha_22:  Null
+    alpha_33:  Null

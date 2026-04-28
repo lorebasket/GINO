@@ -1,0 +1,96 @@
+name: Steel_Box_Beam
+description: Example test case - rectangular steel box beam
+
+components:
+#==================== B L A D E ====================================
+    blade:
+        outer_shape_bem:
+            airfoil_position:
+                grid: [0.0, 1.0]
+                labels: [rectangular, rectangular]
+            chord:
+                grid: [0.0, 1.0]
+                values: [1., 1.]  # normalized chord
+            twist:
+                grid: [0.0, 1.0]
+                values: [0.0, 0.0]
+            pitch_axis:
+                grid: [0.0, 1.0]
+                values: [0., 0.]
+            reference_axis:
+                x:
+                    grid: [0.0, 1.0]
+                    values: [0.0, 2.0]
+                y:
+                    grid: [0.0, 1.0]
+                    values: [0.0, 0.0]
+                z:
+                    grid: [0.0, 1.0]
+                    values: [0.0, 0.0]
+            beam_reference_axis:
+                x:
+                    grid: [0.0, 1.0]
+                    values: [0.0, 2.0]
+                y:
+                    grid: [0.0, 1.0]
+                    values: [0.0, 0.0]
+                z:
+                    grid: [0.0, 1.0]
+                    values: [0.0, 0.0]
+
+#-------------------- C B M ------------------------------------
+        internal_structure_2d_fem:
+            sections:
+              # --- r/R = 0.0 ---
+              - position: 0.0
+                trim_mass: False
+                mesh_resolution: 100 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: Null
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.01,   0, 1, 'wall']
+
+              # --- r/R = 1.0 ---
+              - position: 1.0
+                trim_mass: False
+                mesh_resolution: 100 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: Null
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.01,   0, 1, 'wall']
+
+#==================== A I R F O I L S ==================================
+airfoils:
+   -  name: rectangular
+      coordinates: # follow s-coordinate along the outer profile of the structure
+           x: [0.05, 0.05, -0.05, -0.05,  0.05, 0.05]   # in SI units - m - square box beam 100x100mm -> 0.1x0.1m
+           y: [0.0,   0.05,  0.05, -0.05, -0.05, 0.0]
+
+      relative_thickness: 1.0000
+      aerodynamic_center: 0.5000
+      polars:  # dummy 2pi polars (not used in example)
+         -  configuration: Default
+            re: 3.00E+06
+            c_m:
+                grid: [-3.141592653589793, 3.141592653589793]
+                values: [0.0, 0.0]
+            c_l:
+                grid: [-3.141592653589793, 3.141592653589793]
+                values: [0.0, 0.0]
+            c_d:
+                grid: [-3.141592653589793, 3.141592653589793]
+                values: [0.5, 0.5]
+
+materials:
+  - id: 1
+    name: steel
+    description: Steel (isotropic material)
+    orth: 0
+    rho: 7800  # kg/m³
+    E: 210e9   # Young's modulus in Pa
+    G: 80.77e9    # Shear modulus in Pa
+    nu: 0.3      # Poisson's ratio

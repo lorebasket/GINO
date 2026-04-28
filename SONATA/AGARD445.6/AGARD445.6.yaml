@@ -1,0 +1,117 @@
+name: AGARD445.6
+description: Fem validation example, AGARD445.6 airfoil semispan beam
+
+components:
+# ==== B L A D E ==== #
+    blade:
+        outer_shape_bem:
+            airfoil_position:
+                grid: [0.0, 0.5, 1.0]
+                labels: [AGARD445.60, AGARD445.60, AGARD445.60]
+            chord:
+                grid: [0.0, 0.5, 1.0]
+                #values: [1., 1., 1.]  # normalized chord
+                values: [0.559, 0.463, 0.368]  # normalized chord
+            twist:
+                grid: [0.0, 0.5, 1.0]
+                values: [0.0, 0.0, 0.0]
+            pitch_axis:
+                grid: [0.0, 0.5, 1.0]
+                # values: [0.0, -0.381/0.463, -0.762/0.368]
+                values: [0.0, -0.822, -2.070]
+            reference_axis:
+                x:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.381, 0.762]
+                y:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0]
+                z:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0]
+            beam_reference_axis:
+                x:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.381, 0.762]
+                y:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, -0.381, -0.762]
+                z:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0]
+
+# ==== I N T E R N A L S T R U C T U R E ==== #
+        internal_structure_2d_fem:
+            sections:
+              # --- r/R = 0.0 ---
+              - position: 0.0
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: 2
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.0005,   0, 2, 'wall']
+
+
+              # --- r/R = 0.5 ---
+              - position: 0.5
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: 2
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.0005,   0, 2, 'wall']
+            
+              # --- r/R = 1.0 ---
+              - position: 1.0
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: 2
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.0005,   0, 2, 'wall']
+
+
+# ==== A I R F O I L S ==== #
+airfoils:
+   -  name: AGARD445.60
+      coordinates: # follow s-coordinate along the outer profile of the structure, unitary chord, from TE to LE and back to TE
+           x: [1.0, 1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1, 0.075, 0.05, 0.025, 0.0125, 0.0075, 0.005, 0.0, 0.0, 0.005, 0.0075, 0.0125, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.0, 1.0]
+           y: [0.0, 9e-05, 0.0025, 0.0049, 0.00729, 0.00967, 0.01195, 0.01402, 0.01586, 0.01743, 0.01868, 0.01954, 0.01996, 0.01997, 0.01962, 0.01892, 0.01788, 0.01645, 0.01459, 0.01213, 0.01059, 0.00875, 0.00647, 0.00469, 0.00368, 0.00304, 0.0, -0.0, -0.00304, -0.00368, -0.00469, -0.00647, -0.00875, -0.01059, -0.01213, -0.01459, -0.01645, -0.01788, -0.01892, -0.01962, -0.01997, -0.01996, -0.01954, -0.01868, -0.01743, -0.01586, -0.01402, -0.01195, -0.00967, -0.00729, -0.0049, -0.0025, -9e-05, -0.0, -0.0]
+
+
+# ==== M A T E R I A L S ==== #
+materials:
+  - id: 1
+    name: steel
+    description: steel for reference
+    orth: 0
+    rho: 7800  # kg/m³
+    E: 210e9   # Young's modulus in Pa
+    G: 80.77e9    # Shear modulus in Pa
+    nu: 0.3      # Poisson's ratio
+  
+  - id: 2
+    name: mahogany
+    description: laminated mahogany veneers with glue
+    source: Investigation of Aeroelastic Stability on AGARD 445.6 Wing at Transonic Regime
+    orth: 1
+    rho: 381.6
+    E_1: 3245.5e6
+    E_2: 416.2e6
+    E_3: 416.2e6
+    G_12: 439.2e6
+    G_13: 439.2e6
+    G_23: 439.2e6
+    nu_12: 0.31
+    nu_13: 0.31
+    nu_23: 0.31
+    alpha_11:  Null
+    alpha_22:  Null
+    alpha_33:  Null

@@ -1,0 +1,176 @@
+name: 4_NACA0015
+description: Fem validation example, NACA0015 airfoil full span beam, SHanghai paper
+
+components:
+# ==== B L A D E ==== #
+    blade:
+        outer_shape_bem:
+            airfoil_position:
+                grid: [0.0, 0.35, 0.7, 1.0]
+                labels: [NACA0015, NACA0015, NACA0015, NACA0015]
+            chord:
+                grid: [0.0, 0.35, 0.7, 1.0]
+                values: [0.08, 0.1, 0.124, 0.144]  # normalized chord
+            twist:
+                grid: [0.0, 0.35, 0.7, 1.0]
+                values: [0.0, 0.0, 0.0, 0.0]
+            pitch_axis:
+                grid: [0.0, 0.35, 0.7, 1.0]
+                values: [0.0, 0.0, 0.0, 0.0]
+            reference_axis:
+                x:
+                    grid: [0.0, 0.35, 0.7, 1.0]
+                    values: [0.0, 0.35, 0.7, 1.0]
+                y:
+                    grid: [0.0, 0.35, 0.7, 1.0]
+                    values: [0.0, 0.0, 0.0, 0.0]
+                z:
+                    grid: [0.0, 0.35, 0.7, 1.0]
+                    values: [0.0, 0.0, 0.0, 0.0]
+            beam_reference_axis:
+                x:
+                    grid: [0.0, 0.35, 0.7, 1.0]
+                    values: [0.0, 0.35, 0.7, 1.0]
+                y:
+                    grid: [0.0, 0.35, 0.7, 1.0]
+                    values: [0.0, 0.0, 0.0, 0.0]
+                z:
+                    grid: [0.0, 0.35, 0.7, 1.0]
+                    values: [0.0, 0.0, 0.0, 0.0]
+
+# ==== I N T E R N A L S T R U C T U R E ==== #
+        internal_structure_2d_fem:
+            sections:
+              # --- r/R = 0.0 ---
+              - position: 0.0
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: 1
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.004, 45, 2, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.004, 45, 2, 'wall']
+                      - [0., 1., 0.004, 45, 2, 'wall']
+
+
+              # --- r/R = 0.35 ---
+              - position: 0.35
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: 1
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.004, 45, 2, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.004, 45, 2, 'wall']
+                      - [0., 1., 0.004, 45, 2, 'wall']
+
+              # --- r/R = 0.7 ---
+              - position: 0.7
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: 1
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.004, 45, 2, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.004, 45, 2, 'wall']
+                      - [0., 1., 0.004, 45, 2, 'wall']
+            
+              # --- r/R = 1.0 ---
+              - position: 1.0
+                trim_mass: False
+                mesh_resolution: 500 # ca 450 points on the outer curve - from inside to outside
+                segments:
+                  - id: 0
+                    filler: 1
+                    layup: 
+                        #-[Start[-], End[-], thickness[m], Orientation [deg], MatID[int], 'name'[str]]
+                      - [0., 1., 0.004, 45, 2, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.003, 0, 3, 'wall']
+                      - [0., 1., 0.004, 45, 2, 'wall']
+                      - [0., 1., 0.004, 45, 2, 'wall']
+
+# ==== A I R F O I L S ==== #
+airfoils:
+   -  name: NACA0015
+      coordinates: # follow s-coordinate along the outer profile of the structure, in SI units - m - unitary chord
+           x: [0.566891892, 0.566891892, 0.516891892, 0.466891892, 0.366891892, 0.266891892, 0.166891892, 0.066891892, -0.033108108, -0.133108108, -0.183108108, -0.233108108, -0.283108108, -0.333108108, -0.358108108, -0.383108108, -0.408108108, -0.420608108, -0.433108108, -0.420608108, -0.408108108, -0.383108108, -0.358108108, -0.333108108, -0.283108108, -0.233108108, -0.183108108, -0.133108108, -0.033108108, 0.066891892, 0.166891892, 0.266891892, 0.366891892, 0.466891892, 0.516891892, 0.566891892, 0.566891892]
+           y: [-5.57e-19, 0.00158, 0.01008, 0.0181, 0.03279, 0.0458, 0.05704, 0.06617, 0.07254, 0.07502, 0.07427, 0.07172, 0.06682, 0.05853, 0.0525, 0.04443, 0.03268, 0.02367, -5.57e-19, -0.02367, -0.03268, -0.04443, -0.0525, -0.05853, -0.06682, -0.07172, -0.07427, -0.07502, -0.07254, -0.06617, -0.05704, -0.0458, -0.03279, -0.0181, -0.01008, -0.00158, -5.57e-19]
+
+# ==== M A T E R I A L S ==== #
+materials:
+  - id: 1
+    name: steel
+    description: Steel (isotropic material)
+    orth: 0
+    rho: 7800  # kg/m³
+    E: 210e9   # Young's modulus in Pa
+    G: 80.77e9    # Shear modulus in Pa
+    nu: 0.3      # Poisson's ratio
+
+  - id: 2
+    name: BIAX
+    description: basalto
+    source: Campagna provini
+    orth: 1
+    rho: 1e-9                           #kg/mm**3   - dummy density (not applied for box beam example)
+    E_1: 31449e6                   #N/mm**2, 0° Tensile Modulus
+    E_2: 31449e6                       #N/mm**2, 90° Tensile Modulus
+    E_3: 31449e6                       #N/mm**2, E_3 = E_2
+    G_12: 20404e6                      #N/mm**2, G_ij, is the shear modulus in direction j on the plane whose normal is in direction  i,
+    G_13: 20404e6                        #N/mm**2, G_13 = G_12
+    G_23: 20404e6                        #N/mm**2,
+    nu_12: 0.152                      #-, nu_ij is the Poisson's ratio that corresponds to a contraction in direction j when an extension is applied in direction i.
+    nu_13: 0.152                       #-, nu_13 = nu_12
+    nu_23: 0.152                        #-,
+    alpha_11:  Null                      #1/K Coefficient of thermal expansion
+    alpha_22:  Null                      #1/K alpha_22 = alpha_33
+    alpha_33:  Null                      #1/K
+
+  - id: 3
+    name: UD
+    description: basalto
+    source: Campagna provini
+    orth: 1
+    rho: 1e-9                           #kg/mm**3   - dummy density (not applied for box beam example)
+    E_1: 36115e6                      #N/mm**2, 0° Tensile Modulus
+    E_2: 8712e6                       #N/mm**2, 90° Tensile Modulus
+    E_3: 8712e6                         #N/mm**2, E_3 = E_2
+    G_12: 16715e6                       #N/mm**2, G_ij, is the shear modulus in direction j on the plane whose normal is in direction  i,
+    G_13: 16715e6                        #N/mm**2, G_13 = G_12
+    G_23: 16715e6                       #N/mm**2,
+    nu_12: 0.322                        #-, nu_ij is the Poisson's ratio that corresponds to a contraction in direction j when an extension is applied in direction i.
+    nu_13: 0.322                         #-, nu_13 = nu_12
+    nu_23: 0.322                         #-,
+    alpha_11:  Null                      #1/K Coefficient of thermal expansion
+    alpha_22:  Null                      #1/K alpha_22 = alpha_33
+    alpha_33:  Null                      #1/K
+    
