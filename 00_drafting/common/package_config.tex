@@ -123,3 +123,55 @@
     language=C,
     lineskip=-0.1ex
 }
+
+% -------------------------------------------------------
+%  Colour palette – PK-method flowchart (chap3)
+% -------------------------------------------------------
+\definecolor{nastranGray}{RGB}{180,180,180}
+\definecolor{devRed}{RGB}{200,40,40}
+\definecolor{blockBlue}{RGB}{220,235,255}
+\definecolor{blockGreen}{RGB}{220,245,220}
+\definecolor{blockRed}{RGB}{255,225,220}
+\definecolor{blockYellow}{RGB}{255,250,210}
+\definecolor{termColor}{RGB}{200,220,255}
+\definecolor{decisionColor}{RGB}{255,245,200}
+
+% -------------------------------------------------------
+%  TikZ styles – PK-method flowchart (chap3)
+% -------------------------------------------------------
+\tikzset{
+  terminal/.style={
+    rectangle, rounded corners=8pt,
+    draw=black, thick,
+    fill=termColor,
+    text width=3.2cm, align=center,
+    minimum height=0.75cm, font=\small\bfseries
+  },
+  process/.style={
+    rectangle, draw=black, thick,
+    fill=blockBlue,
+    text width=3.8cm, align=center,
+    minimum height=0.8cm, font=\small
+  },
+  procGray/.style={
+    rectangle, draw=black!60, thick,
+    fill=nastranGray!40,
+    text width=3.8cm, align=center,
+    minimum height=0.8cm, font=\small
+  },
+  procDev/.style={
+    rectangle, draw=devRed, very thick,
+    fill=blockRed,
+    text width=3.8cm, align=center,
+    minimum height=0.8cm, font=\small
+  },
+  decision/.style={
+    diamond, draw=black, thick,
+    fill=decisionColor,
+    text width=2.6cm, align=center,
+    inner sep=1pt, font=\small,
+    aspect=1.6
+  },
+  arr/.style={-{Stealth[length=6pt]}, thick},
+  arrRed/.style={-{Stealth[length=6pt]}, very thick, devRed},
+}

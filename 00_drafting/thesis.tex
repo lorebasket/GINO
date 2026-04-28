@@ -1,137 +1,112 @@
-% !TEX encoding = UTF-8 Unicode
-% !TEX TS-program = pdflatex
 
-% toptesi document class
-%\documentclass[%
-%    a4paper, % not needed, by default it is a4paper, or also b5paper can be used
-%    corpo=12pt, % dimension of basic font
-%    % oneside is generally the way to go
-%    oneside, % two side optimizes for two-face printing, having chapters open on the right (aka odd numbers), if you don't want blank pages put oneside here
-%    stile=standard,
-%    %evenboxes, % not needed, to put supervisors and candidate at the same level
-%    tipotesi=magistrale,
-%    numerazioneromana, % roman numbering for appendixes and preambles, up to Table of Contents
-%    openright, % to force opening on the right for double-sided printing
-%    cucitura=7mm, % for printing, 7mm should be enough
-    %dvipsnames, % for compatibility with xcolor, it does not work
-%]{toptesi}
-
-\documentclass[11pt]{report}
-
+\documentclass[10pt,oneside]{report}
 
 \setcounter{secnumdepth}{4}
 \setcounter{tocdepth}{4}
 
-\input{00_drafting/common/packages}
+\input{common/packages}
 
-\input{00_drafting/common/package_config}
+\input{common/package_config}
 
-\input{00_drafting/common/new_commands}
+\input{common/new_commands}
 
-\input{00_drafting/common/thesis_info.tex}
+\input{common/thesis_info.tex}
 
-\input{00_drafting/common/font_config.tex}
+\input{common/font_config.tex}
 
-\addbibresource{00_drafting/bibliography.bib}
+\addbibresource{bibliography.bib}
+% Additional bibliography file (chapter-specific or recently added refs)
+\addbibresource{common/bibliography_extra.bib}
 
-% to load the glossaries, not needed if using bib2gls
-\input{00_drafting/glossaries.tex}
+% Load nomenclature definitions
+\input{nomenclature.tex}
 \makeglossaries
 
+\setlength{\headheight}{14pt}
+
+% Customize chapter formatting to remove "Chapter X"
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries}  % Format for chapter title
+  {}  % Empty - removes "Chapter X"
+  {0pt}  % Space between label and title
+  {\LARGE}  % Format for the title text
+\titlespacing*{\chapter}
+  {0pt}  % Left margin
+  {0pt}  % Space before the title (reduced from default ~50pt)
+  {15pt}  % Space after the title (reduced from default ~40pt)
+
+% Reduce spacing in itemize and enumerate environments
+\setlist[itemize]{itemsep=2pt, parsep=0pt, topsep=5pt}
+\setlist[enumerate]{itemsep=2pt, parsep=0pt, topsep=5pt}
+
+% Available font sizes:
+%\tiny
+%\scriptsize
+%\footnotesize
+%\small
+%\normalsize
+%\large
+%\Large          % <-- Good for chapter titles
+%\LARGE
+%\huge
+%\Huge           % <-- Default, very large
+
+\begin{document}
+
 \pagestyle{fancy}
-\fancyhf{}  % Svuota le intestazioni esistenti
+\fancyhf{}
 \fancyhead[C]{\itshape \leftmark}  % Titolo del capitolo in corsivo
 \fancyfoot[C]{\thepage}  % Numero di pagina centrato in basso
 % Personalizza \chaptermark per mostrare solo il titolo, senza "Chapter X"
 \renewcommand{\chaptermark}[1]{\markboth{#1}{}}
+\renewcommand{\headrulewidth}{0.4pt}  % Optional: add header line
 
-\renewcommand{\thepage}{\Roman{page}}
+\input{common/config}
+\input{common/frontpage.tex} % custom frontpage
 
-\begin{document}
-
-\input{00_drafting/common/config}
-
-%\input{common/toptesi_config}
-
-% front page
-% frontespizio can be used for the first page print
-% while the custom-made frontpage can be used as hard-cover
-% use pdfjoin or pdfseparate to extract or put together the pages if needed
-%\frontespizio* % without star the logo is on top
-\input{00_drafting/common/frontpage.tex} % custom frontpage
-%\retrofrontespizio
-% insert text for the back of the front page
-% if you insert any remove the following \paginavuota
-% either a blank page or a back is needed to have double-sided printing
-% pay attention to leave the space for the page
-
-\paginavuota % clears a page
+% Insert blank page after frontpage
+\newpage
+\thispagestyle{empty}
+\mbox{}  % This creates an empty box to force the page to exist
+\newpage
 
 %\frontmatter
-
-% abstract if needed
-% \begin{abstract}
-%     \input{content/abstract.tex}
-% \end{abstract}
-
-% to create blank pages for openright in frontmatter
-% use one of the following two methods
-% 1) use the following three lines
-%\phantom{0} % needed otherwise cleardoublepage does not clean the page because it sees it empty
-%\cleardoublepage
-%\thispagestyle{empty} % to have empty page, without numbers
-% 2) or
-\paginavuota % to manually create a blank page
-
 \pagenumbering{Roman}
-%\sommario
-\input{00_drafting/content/abstract}
 
-\phantom{0}
-\cleardoublepage
+%abstract if needed
+\begin{abstract}
+\input{content/abstract.tex}
+\end{abstract}
+
+% Blank page after abstract
+\clearpage
 \thispagestyle{empty}
+\mbox{}
+\clearpage
 
 %\ringraziamenti
-\input{00_drafting/content/acknowledgements}
+\input{content/acknowledgements}
 
 \tableofcontents
 
-
 \listoffigures
-
 
 \listoftables
 
-% actually abbreviation is the name used for acronym in glossaries-extra
-% title sets the name
-% type tells the type of glossary to print
-% style overrides the global style
-% here we are printing only abbreviations
-% printunsrtglossary if using record, otherwise printglossary is ok
-\paginavuota
-\printunsrtglossary[style=long,title=Acronyms,type=\acronymtype]
+% Nomenclature page
+\printunsrtglossary[style=long,title=Nomenclature,type=symbols]
 
-% also list of symbols here if needed
+\input{common/post_summary_config.tex}
 
-\input{00_drafting/common/post_summary_config.tex}
-
-%\mainmatter
-
-%\part{Prima Parte} % parts division, not needed
-% Chapters always open on a right-side page, i.e. odd numbers, so a blank page is inserted if needed
-%\cleardoublepage % to have a fully blank page
-% a blank page appears before the first chapter in some configurations, on the last version it doesn't
-
-\paginavuota
+\newpage
 \pagenumbering{arabic}
-
-\input{00_drafting/content/chapters}
+\input{content/chapters}
 
 % \paginavuota % it works even without stile=classica
 
-\appendix
-\input{00_drafting/content/appendixA}
-\input{00_drafting/content/appendixB}
+%%\appendix
+%%\input{content/appendixA}
+%%\input{content/appendixB}
 
 % endnotes here if needed
 
@@ -140,7 +115,7 @@
 \printbibliography[heading=bibintoc] % heading required to show it in ToC
 
 
-\Dedications
-\input{00_drafting/dedications}
+%\Dedications
+%\input{dedications}
 
 \end{document}

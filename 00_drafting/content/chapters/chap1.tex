@@ -1,30 +1,210 @@
-\chapter{Chapter One}
+\chapter{Introduction}
+\section{Context and motivation}
+In the last few years, the use of slender load-bearing profiles in hydrodynamic environments, such as hydrofoils for racing yachts,
+marine propulsion systems and renewable energy devices, has grown significantly.
+The adoption of lightweight structures, often made of composite materials, allows for improving overall system efficiency,
+but it makes such components more sensitive to aero-hydro-elastic undesired phenomena, particularly flutter.
 
-\section{Section name}
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. \cite{IEEEexample:article_typical}
+Flutter represents a form of self-excited dynamic instability, where the interaction between structural rigidity, 
+inertias and fluid-dynamic loads leads to increasing amplitude oscillations.
+For a hydrofoil, the onset of flutter can lead to loss of performance, structural damage or collapse, with possible
+relevant safety consequences, reliability impacts and operational costs.
 
-\begin{figure}
+It thus becomes essential to develop analysis instruments able to prevent, during the design phase, the onset of these instabilities,
+guiding geometrical, material and mass distribution choices.
+
+High-fidelity approaches based on computational fluid dynamics coupled with complex structural models guarantee high accuracy of the phenomenon,
+but they are often computationally expensive and difficult to integrate into iterative design cycles.
+On the other hand, aeroelastic reduced-order methods, which combine beam models with unsteady potential aerodynamics,
+offer an advantageous compromise between accuracy and computational cost. Naturally, the workflow chain must be defined coherently, verified and reproducible.
+
+This thesis fits into this context, aiming to develop a modular numerical procedure for analyzing flutter of slender wings, 
+with particular attention to hydrofoils.
+
+\section{Current challenges}
+Extensive literature covers aeroelasticity of wings in aerodynamic environments and, increasingly, of hydrofoils in hydrodynamic flows. 
+However, several recurring critical gaps are observed:
+
+\begin{itemize}
+    \item absence of an integrated workflow spanning from realistic section definition (materials, layup, shear center and mass center locations) to flutter prediction in a coherent manner;
+    \item limited availability of readily integrable tools combining:
+    \begin{itemize}
+        \item flexible parametrization of geometry and material properties,
+        \item generation of stiffness and mass properties for composite sections,
+        \item a dedicated flexible beam solver,
+        \item a consolidated, unsteady panel aerodynamic model,
+        \item a flutter solver based on standard industrial methods;
+    \end{itemize}
+    \item fragmented documentation, hindering result reuse and adoption in preliminary design workflows.
+\end{itemize}
+
+These gaps motivate the development of a transparent computational environment, verified against known benchmarks and readily extensible 
+to diverse wing and hydrofoil configurations.
+
+\section{Objectives of this thesis}
+The overall objective of this thesis is to define, implement, and validate a modular numerical procedure for analyzing flutter of slender wing structures 
+in fluid environments, with particular reference to hydrofoils, based on the seamless coupling of structural, aerodynamic, and hydrodynamic analysis modules.
+
+In particular, the work aims to:
+\begin{enumerate}
+    \item define a \textbf{standardized input model} for describing geometry, materials and layup of wing sections,
+    \item build a \textbf{modular computational chain} using the consolidated \textbf{SONATA/ANBA4} tool to generate cross-sectional structural matrices and the associated one-dimensional Euler-Bernoulli beam model,
+    \item implement and verify a \textbf{custom FEM beam solver} for static and modal analysis of equivalent beams, comparing results with literature solutions and reference cases (Timoshenko beams, cantilevers, and modal verification),
+    \item develop a comprehensive \textbf{aerodynamic and hydrodynamic modeling framework} integrating the \textbf{Doublet Lattice Method} (via \textbf{PanelAero}) for unsteady forces, \textbf{Rational Function Approximation} (RFA) for frequency-dependent aerodynamic matrices, and a \textbf{hybrid DLM-BEM approach} combining DLM with \textbf{Capytaine BEM} to capture three-dimensional added-mass effects in water,
+    \item define a coherent \textbf{coupling strategy} between the aerodynamic/hydrodynamic grid and structural finite-element nodes, with explicit treatment of both aeroelastic (air) and hydroelastic (water) environments,
+    \item implement a \textbf{flutter solver} based on the industrial-standard \textbf{p--k method}, including automatic mode tracking and eigenvalue convergence criteria,
+    \item \textbf{integrate all modules} into a coherent, reproducible, and openly documented computational workflow,
+    \item \textbf{verify and validate} each module and the complete procedure against established benchmarks (Goland wing for aeroelasticity, NACA0003 for hydroelasticity, literature data),
+    \item apply the \textbf{end-to-end procedure} to realistic \textbf{hydrofoil case studies} (wing01 flexible wing and tnz\_multibody assembly), evaluating the effect of structural and modeling parameters on dynamic behavior and flutter boundary conditions.
+\end{enumerate}
+
+\begin{figure}[h]
     \centering
-    \includegraphics[width=0.5\linewidth]{00_drafting/images/polito_logo_2021_blu_cut.jpg}
-    \caption{Image Caption}
-    \label{fig:enter-label}
+    \begin{tikzpicture}[
+        >=LaTeX,
+        node distance=0.9cm,
+        scale=1.3,
+        transform shape,
+        block/.style={
+            rectangle,
+            draw,
+            rounded corners,
+            align=center,
+            minimum width=2.2cm,
+            minimum height=0.5cm,
+            font=\tiny
+        },
+        line/.style={->, thick, line width=0.8pt},
+        decision/.style={
+            diamond,
+            draw,
+            align=center,
+            minimum width=1.6cm,
+            minimum height=0.6cm,
+            font=\tiny
+        }
+    ]
+
+    % TOP: GEOMETRY AND INPUTS
+    \node[block] (geom) {Geometry \& Material\\Definition};
+    
+    % LEFT BRANCH: STRUCTURAL PATH
+    \node[block, below left=0.2cm and 0.8cm of geom] (sonata) {Cross-section\\(SONATA)};
+    \node[block, below=0.4 of sonata] (fem) {1D Beam FEM\\$\mathbf{M}_s,\ \mathbf{K}_s$};
+    \node[block, below=0.4 of fem] (dry) {Dry Modal\\$\Phi$, $\omega_{dry}$};
+
+    % RIGHT BRANCH: AERODYNAMIC PATH (DLM)
+    \node[block, below right=0.2cm and 0.8cm of geom] (aero) {Aerodynamic Grid\\DLM (PanelAero)};
+    \node[block, below=0.4 of aero] (aic) {AIC Matrix\\$\mathbf{Q}(k)$};
+
+    % Decision point: Aeroelastic vs Hydroelastic
+    \node[decision, below=0.4 of aic] (decide) {Fluid?};
+    
+    % AEROELASTIC PATH (left branch from decision)
+    \node[block, below left=0.2cm and 0.7cm of decide] (aero_path) {Aeroelastic\\(Air)};
+    \node[block, below=0.4 of aero_path] (aero_matrices) {DLM only};
+
+    % CONVERGENCE POINT: Both paths merge
+    \node[block, below left=0.3cm and 0.2 cm of aero_matrices] (coupling1) {Coupling $\mathbf{Z}$};
+
+    % HYDROELASTIC PATH (right branch from decision)
+    \node[block, below right=0.2cm and 0.7cm of decide] (hydro_path) {Hydroelastic\\(Water)};
+    \node[block, below=0.4 of hydro_path] (bem) {Capytaine BEM\\ substitute $A2_{dlm}$ with $\mathbf{A}_{hydro}$ \\ add $\mathbf{B}_{hydro}$};
+    \node[block, below=0.4 of bem] (RFA) {Rational Function Approximation\\$\mathbf{Q}(k) \to \mathbf{Q}_0 + \sum \frac{\mathbf{Q}_j}{s - p_j}$};
+
+    % CONVERGENCE POINT: Both paths merge
+    \node[block, below left=3cm and 0.3 cm of RFA] (coupling2) {Coupling $\mathbf{Z}$};
+    
+    % SYSTEM ASSEMBLY
+    \node[block, below=0.4 of coupling1] (wet1) {FSI System\\$\mathbf{M}$, $\mathbf{C}$, $\mathbf{K}$};
+    \node[block, below=0.4 of wet1] (flutter1) {p-k Method};
+    \node[block, below=0.4 of flutter1] (output1) {Wet $\omega$ over a sweep of $U$};
+
+    % SYSTEM ASSEMBLY
+    \node[block, below=0.4 of coupling2] (wet2) {FSI System\\$\mathbf{M}$, $\mathbf{C}$, $\mathbf{K}$};
+    \node[block, below=0.4 of wet2] (flutter2) {Eigenvalue Problem looped over Velocity};
+    \node[block, below=0.4 of flutter2] (output2) {Wet $\omega$ over a sweep of $U$};
+
+    % ============================================================
+    % CONNECTIONS: Structural path
+    % ============================================================
+    \draw[line] (geom) -| (sonata);
+    \draw[line] (sonata) -- (fem);
+    \draw[line] (fem) -- (dry);
+    \draw[line] (dry) |- (coupling1);
+    \draw[line] (dry) |- (coupling2);
+
+    % ============================================================
+    % CONNECTIONS: Aerodynamic path (DLM + RFA)
+    % ============================================================
+    \draw[line] (geom) -| (aero);
+    \draw[line] (aero) -- (aic);
+    \draw[line] (aic) -- (decide);
+
+    % ============================================================
+    % CONNECTIONS: Aeroelastic vs Hydroelastic decision
+    % ============================================================
+    \draw[line] (decide) -| (aero_path) node[midway, above, font=\tiny] {Air};
+    \draw[line] (decide) -| (hydro_path) node[midway, above, font=\tiny] {Water};
+
+    % ============================================================
+    % CONNECTIONS: Aeroelastic branch
+    % ============================================================
+    \draw[line] (aero_path) -- (aero_matrices);
+    \draw[line] (aero_matrices) |- (coupling1);
+
+    % ============================================================
+    % CONNECTIONS: System assembly and solution
+    % ============================================================
+    \draw[line] (coupling1) -- (wet1);
+    \draw[line] (wet1) -- (flutter1);
+    \draw[line] (flutter1) -- (output1);
+
+    % ============================================================
+    % CONNECTIONS: Hydroelastic branch
+    % ============================================================
+    \draw[line] (hydro_path) -- (bem);
+    \draw[line] (bem) -- (RFA);
+    \draw[line] (RFA) |- (coupling2);
+
+    % ===========================================================
+    % CONNECTIONS: System assembly and solution
+    % ============================================================
+    \draw[line] (coupling2) -- (wet2);
+    \draw[line] (wet2) -- (flutter2);
+    \draw[line] (flutter2) -- (output2);
+
+    \end{tikzpicture}
+    \caption{Unified workflow for aeroelastic and hydroelastic flutter analysis.}
+    \label{fig:aeroelastic_workflow}
 \end{figure}
 
+To ensure the validity of the work, each custom-built module and the entire workflow are validated both analytically
+and with reference benchmark cases.
 
-\begin{longtable}{ | m{4em} | m{4em} | m{4em} | m{4em} | m{4em} | m{4em} | m{4em} | }
-\hline
-\textbf{Col name} & \textbf{Col name} & \textbf{Col name} & \textbf{Col name} & \textbf{Col name} & \textbf{Col name} & \textbf{Col name} \\
-\hline
-\endfirsthead
-\hline
-\textbf{Col name} & \textbf{Col name} & \textbf{Col name} & \textbf{Col name} & \textbf{Col name} & \textbf{Col name} & \textbf{Col name} \\
-\hline
-\endhead
+The unified workflow for aeroelastic and hydroelastic flutter analysis is represented in Figure \ref{fig:aeroelastic_workflow}. The scheme illustrates the hybrid DLM-BEM approach tailored for hydrofoil design: 
 
-text & text & text & text & text & text & text \\
-\hline
+\begin{itemize}
+    \item The \textbf{left branch} develops structural properties: geometry and material definitions are processed through SONATA/ANBA4 to generate cross-sectional matrices, which are then assembled into a one-dimensional finite-element beam model. A ``dry'' modal analysis (without fluid loading) is performed to extract the structural eigenvalues and eigenvectors serving as the baseline for aeroelastic coupling.
+    \item The \textbf{right branch} develops aerodynamic matrices: the aerodynamic grid is discretized for the Doublet Lattice Method (PanelAero), the Aerodynamic Influence Coefficient (AIC) matrix $\mathbf{Q}(k)$ is computed as a function of reduced frequency, and Rational Function Approximation is applied to obtain frequency-independent aerodynamic coefficients suitable for flutter analysis.
+    \item A \textbf{decision point} routes the analysis to either the \textbf{aeroelastic path} (air environment, using DLM exclusively) or the \textbf{hydroelastic path} (water environment, combining DLM with Capytaine BEM corrections). The hybrid approach eliminates the thin-wing approximation error inherent in DLM by replacing the asymptotic added-mass term with Capytaine's three-dimensional boundary-element calculation $\mathbf{A}_{hydro}(\infty)$.
+    \item Both paths converge at the \textbf{coupling matrix} $\mathbf{Z}$, where structural and aerodynamic/hydrodynamic terms are assembled into a unified FSI system with mass $\mathbf{M}$, damping $\mathbf{C}$, and stiffness $\mathbf{K}$ matrices.
+    \item The \textbf{p-k method} solves for the stability characteristics (eigenvalues and eigenvectors) across a sweep of velocities, identifying the flutter boundary where damping transitions from positive (stable) to negative (unstable).
+    \item The output is the complete flutter envelope: ``wet'' natural frequencies and damping ratios plotted as functions of flow velocity.
+\end{itemize}
 
+\newpage
+\section{Document structure}
+The remainder of this document is organized as follows:
 
-\caption{Long Table}
-\label{tab:GPS_ICD} \\
-\end{longtable}
+Chapter 2 (\textit{Structural Modeling and FEM Analysis}) introduces the theoretical foundations of beam structural modeling for slender structures, the development of cross-sectional properties, assembly of finite-element matrices, and the concept of ``dry'' modal analysis without fluid coupling.
+
+Chapter 3 (\textit{Aeroelastic and Hydroelastic Modeling}) establishes the distinction between aeroelastic (air) and hydroelastic (water) environments, describes the aerodynamic and hydrodynamic force models based on the Doublet Lattice Method (DLM) and Boundary Element Method (BEM), introduces Rational Function Approximation (RFA) for frequency-dependent aerodynamic matrices, and defines the coupling strategy between structural and fluid domains. A hybrid DLM-BEM approach is presented for hydrofoil applications to capture three-dimensional added-mass effects while maintaining computational efficiency.
+
+Chapter 4 (\textit{Flutter Analysis: The p-k Method}) details the mathematical formulation and numerical implementation of the p--k method, including the nested outer loop (velocity sweep, altitude, Mach number) and inner loop (mode-by-mode iterative solution with reduced frequency updating). The chapter includes detailed flowcharts, convergence criteria, and mode-tracking algorithms essential for automated flutter identification.
+
+Chapter 5 (\textit{Verification and Validation}) presents systematic validation of the aeroelastic and hydroelastic frameworks through sensitivity studies, grid convergence analyses, and benchmark comparisons. The Goland wing flutter test case is used as the primary aeroelastic reference, while the NACA0003 hydrofoil provides hydroelastic validation. Each stage of the pipeline is verified against established analytical and numerical results.
+
+Chapter 6 (\textit{Hydrofoil Case Study}) demonstrates the complete end-to-end application of the developed workflow to realistic hydrofoil structures. The chapter covers two primary applications: the \texttt{wing01} flexible composite hydrofoil (examining isolated wing dynamics) and the \texttt{tnz\_multibody} assembly (representing a practical racing-yacht foil system). Results include dry and wet modal characteristics, flutter boundaries, and parametric sensitivity studies.
+
+Chapter 7 (\textit{Discussion, Conclusion and Further Work}) synthesizes the results, provides critical assessment of the developed framework, discusses model limitations and design implications, and proposes future developments including complete Rational Function Approximation, viscous effects modeling, cavitation analysis, and experimental validation.
