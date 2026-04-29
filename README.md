@@ -5,6 +5,15 @@
 Developed as part of a Master's thesis at Politecnico di Torino, in collaboration with:
 Pietro Casalone (Politecnico di Torino), Davide Tagliapietra (Shickler Tagliapietra Yacht Enngineering), Luca Valsecchi (Toolspole) and Paolo Motta (Toolspole).
 
+The increasing integration of composite materials into marine lifting surfaces, such as hydrofoils
+and turbine blades, is unlocking new opportunities for weight reduction and structural efficiency.
+However, this trend amplifies the need for reliable prediction of unsteady hydrodynamic behaviour
+and coupled hydro-elastic instabilities, with flutter remaining one of the most critical challenges. Most
+available numerical tools are either accurate but computationally expensive or rely on oversimplified
+modelling that fails to capture the complex coupling between hydrodynamics, structural anisotropy,
+and dynamic stability. This work introduces a comprehensive framework that directly addresses these
+limitations.
+
 Copyright (C) 2025 Lorenzo Baraltech — Dual-licensed under [GPL-3.0-or-later](LICENSE) or a separate [commercial license](COMMERCIAL_LICENSE.md).
 
 The framework couples a **finite element beam model** (FEA), an **aerodynamic panel method** (DLM), a **boundary element method** (BEM), and a **flutter solver** (P-K method or Roger RFA) to predict the flutter onset speed and frequency of hydrofoils, wings, and multi-body structures.
@@ -26,22 +35,20 @@ FSI/
 │   ├── tnz_multibody/               ← ETNZ multi-body foil (SONATA required)
 │   └── ...
 │
-├── SONATA/                          ← Beam cross-section analysis (SONATA + ANBA4)
-│   └── README.md                    ← ← See this for SONATA workflow
+├── STRUCTURE/
+│   ├── FEA/                         ← Structural model + FE utilities
+│   └── SONATA/                      ← Beam cross-section analysis (SONATA + ANBA4)
+│       └── README.md                ← ← See this for SONATA workflow
 │
-├── PanelAero/                       ← Aerodynamic panel model and Qjj precomputation
-│   └── README.md                    ← ← See this for Qjj precomputation workflow
+├── FLUID/
+│   ├── aerodynamic_model.py         ← Aerodynamic model assembly
+│   └── PanelAero/                   ← Qjj precomputation utilities
+│       └── README.md                ← ← See this for Qjj precomputation workflow
 │
-├── FEA/
-│   └── fea_utl/                     ← FE beam model utilities
-│
-├── Hydroelastic_analysis_workflow/  ← Analysis pipeline modules
-│   ├── structural_model.py
-│   ├── structural_analysis.py
-│   ├── aerodynamic_model.py
+├── COUPLING/                        ← Aero-structural coupling + flutter solvers
 │   ├── aero_structural_coupling.py
 │   ├── flutter_solver.py
-│   └── post_processing.py
+│   └── hydroelastic_utl/
 │
 └── docs/                            ← Thesis and bibliography
 ```
@@ -59,14 +66,14 @@ A **conda environment** is strongly recommended (Python 3.9–3.11).
 SONATA computes the 6×6 cross-sectional stiffness and mass matrices from blade geometry YAML files.  
 It is required only for cases listed under *"Cases that require SONATA outputs"* (e.g. `GOLAND_sonata`, `tnz_multibody`, `wing01`).
 
-Clone it into `SONATA/9_gitclone/`:
+Clone it into `STRUCTURE/SONATA/9_gitclone/`:
 
 ```bash
-cd SONATA
+cd STRUCTURE/SONATA
 git clone https://github.com/WISDEM/SONATA 9_gitclone
 ```
 
-> See [`SONATA/README.md`](SONATA/README.md) for the full workflow and per-script path configuration.
+> See [`STRUCTURE/SONATA/README.md`](STRUCTURE/SONATA/README.md) for the full workflow and per-script path configuration.
 
 ---
 
@@ -81,7 +88,7 @@ pip install PanelAero
 
 Repository: [github.com/DLR-AE/PanelAero](https://github.com/DLR-AE/PanelAero)
 
-> See [`PanelAero/README.md`](PanelAero/README.md) for the Qjj precomputation workflow.
+> See [`FLUID/PanelAero/README.md`](FLUID/PanelAero/README.md) for the Qjj precomputation workflow.
 
 ---
 
@@ -188,11 +195,11 @@ Structural properties are read from CSV files exported by the SONATA scripts. Th
 
 | Case | SONATA example to run first |
 |---|---|
-| `GOLAND_sonata` | `SONATA/GOLAND/GOLAND.py` (if present) |
-| `tnz_multibody` | `SONATA/ETNZ/` scripts |
-| `wing01` | `SONATA/wing01/` scripts |
+| `GOLAND_sonata` | `STRUCTURE/SONATA/GOLAND/GOLAND.py` (if present) |
+| `tnz_multibody` | `STRUCTURE/SONATA/ETNZ/` scripts |
+| `wing01` | `STRUCTURE/SONATA/wing01/` scripts |
 
-See [`SONATA/README.md`](SONATA/README.md) for the full workflow.
+See [`STRUCTURE/SONATA/README.md`](STRUCTURE/SONATA/README.md) for the full workflow.
 
 ---
 
@@ -200,12 +207,12 @@ See [`SONATA/README.md`](SONATA/README.md) for the full workflow.
 
 All cases require precomputed aerodynamic influence coefficient matrices (Qjj). These are **not included** in the repository due to their size and must be computed locally before running `main.py`.
 
-See [`PanelAero/README.md`](PanelAero/README.md) for the full workflow.
+See [`FLUID/PanelAero/README.md`](FLUID/PanelAero/README.md) for the full workflow.
 
 In short:
 
 ```bash
-cd PanelAero/Qjj
+cd FLUID/PanelAero/Qjj
 python executer.py          # single configuration
 # or
 python executer_multi_aerogrid.py   # multiple configurations (grid convergence)
@@ -220,7 +227,7 @@ The case config file (`examples/<case_name>/config_<case_name>.py`) specifies wh
 1. Create a folder `examples/<your_case>/`
 2. Add `config_<your_case>.py` — define geometry, stiffness, fluid, and Qjj path  
    (copy an existing case as template, e.g. `examples/GOLAND/config_GOLAND.py`)
-3. Precompute the Qjj matrices for the new geometry using `PanelAero/Qjj/executer.py`
+3. Precompute the Qjj matrices for the new geometry using `FLUID/PanelAero/Qjj/executer.py`
 4. If structural properties come from SONATA, run the corresponding SONATA script first
 5. Run: `python main.py <your_case>`
 
@@ -250,7 +257,7 @@ This framework is built on top of two external open-source libraries that are dy
 **Author:** Arne Voß, Deutsches Zentrum für Luft- und Raumfahrt e.V. (DLR)  
 **License:** [BSD 3-Clause "New" or "Revised" License](https://github.com/DLR-AE/PanelAero/blob/master/LICENSE)
 
-PanelAero is used in this project to compute aerodynamic influence coefficient matrices (Qjj) via the Doublet Lattice Method (DLM) and Vortex Lattice Method (VLM). It is installed as a standard Python package (`pip install PanelAero`) and called through the scripts in `PanelAero/Qjj/`.
+PanelAero is used in this project to compute aerodynamic influence coefficient matrices (Qjj) via the Doublet Lattice Method (DLM) and Vortex Lattice Method (VLM). It is installed as a standard Python package (`pip install PanelAero`) and called through the scripts in `FLUID/PanelAero/Qjj/`.
 
 **Compliance statement:** The BSD 3-Clause License permits free use, modification, and integration into other projects, provided that the copyright notice and license text are retained. This framework does not redistribute PanelAero source code or binaries. The copyright notice is reproduced here in accordance with clause 1 of the license:
 
@@ -266,7 +273,7 @@ The name of DLR is not used to endorse or promote this project, in compliance wi
 **Repository:** [github.com/WISDEM/SONATA](https://github.com/WISDEM/SONATA) / [github.com/NLRWindSystems/SONATA](https://github.com/NLRWindSystems/SONATA)  
 **License:** [GNU Lesser General Public License v3.0](https://github.com/NLRWindSystems/SONATA/blob/master/license.txt)
 
-SONATA is used in this project to compute the 6×6 cross-sectional stiffness and mass matrices of composite beam sections from YAML geometry files. It is cloned separately by the user into `SONATA/9_gitclone/` and is only required for specific analysis cases (e.g. `GOLAND_sonata`, `tnz_multibody`, `wing01`). The main flutter pipeline (`main.py`) does **not** depend on SONATA at runtime.
+SONATA is used in this project to compute the 6×6 cross-sectional stiffness and mass matrices of composite beam sections from YAML geometry files. It is cloned separately by the user into `STRUCTURE/SONATA/9_gitclone/` and is only required for specific analysis cases (e.g. `GOLAND_sonata`, `tnz_multibody`, `wing01`). The main flutter pipeline (`main.py`) does **not** depend on SONATA at runtime.
 
 **Compliance statement:** The GNU LGPLv3 permits use of the library in a larger application without imposing the LGPL on the application itself, provided that:
 1. The user can replace the LGPL-covered library with a modified version (satisfied: SONATA is cloned independently by the user, not bundled here).
