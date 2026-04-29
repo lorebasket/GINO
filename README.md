@@ -1,4 +1,4 @@
-# FLUTTER-FSI
+# GINO
 
 An Opensource Framework for the hydroelastic analysis of composite beams.  
 Developed as part of a Master's thesis at Politecnico di Torino, in collaboration with:
