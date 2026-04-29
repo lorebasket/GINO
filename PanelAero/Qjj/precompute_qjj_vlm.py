@@ -8,9 +8,7 @@ def precompute_qjj_vlm(FSI_path, aerogrid, Ma_list, out_dir,
     Precompute steady (real) Qjj using VLM.calc_Qjj for a list of Mach numbers.
     Saves one real .npy per Ma: ma_{i:04d}.npy and an index.json with Ma_list and shape.
     """
-    import sys
-    sys.path.append(FSI_path + '/PanelAero')
-    from panelaero_utl import VLM
+    from panelaero import VLM
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

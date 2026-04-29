@@ -5,6 +5,7 @@ import csv
 def main(start_time=None):
 
     import sys
+    import os
     import numpy as np
     from pathlib import Path
     from precompute_qjj import precompute_qjj_grid, check_existing_qjj_files
@@ -13,31 +14,29 @@ def main(start_time=None):
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
     import math
 
-    FSI_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    FSI_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     sys.path.extend([
         FSI_path,
         FSI_path + '/PanelAero',
         FSI_path + '/PanelAero/panelaero_utl',
-        FSI_path + '/PanelAero/panelaero_utl/old',
         FSI_path + '/SONATA/wing01',
         FSI_path + '/SONATA/arm01'
     ])
 
-    from rotate_aerogrid import _rotation
+    #from rotate_aerogrid import _rotation
+    import rotate_aerogrid
     import build_aeromodel
     from CAERO1_generator import format_caero1_card
-    import rotate_aerogrid
-    from rotate_aerogrid_z import rotate_aerogrid_z
-    #import LE_curve_points, TE_curve_points
+
     import build_aeromodel_crvs
     from scipy.interpolate import interp1d
     from Hydroelastic_analysis_workflow.post_processing import plot_aero_beam_model
 
     # --- AEROGRID SETUP --- #
-    blade_name = 'ABRAMSON1965' # 'hollowell', 'wing01', 'GOLAND'
+    blade_name = 'wing01' # 'hollowell', 'wing01', 'GOLAND'
     fluid = 'water'
-    nspan = [22] # number of spanwise panels
+    nspan = [4] # number of spanwise panels
     AR = [0.5]  # aspect ratio
     DLM = True
     VLM = False
@@ -54,13 +53,17 @@ def main(start_time=None):
     c_sound = {'air': 332.5, 'water':1484.0} # speed of sound of air at 2000m altitude
 
     # --- LIST  --- #
-    k_list = np.round(np.concatenate([np.linspace(0.001, 1, 10), np.linspace(1, 4, 10), np.linspace(4, higher_k, 100)]), 3)
+    k_list = np.round(np.concatenate([np.linspace(0.001, 1, 10), np.linspace(1, 4, 10), np.linspace(4, 30, 80)]), 3)
     V_list = np.linspace(5, 55, 50)
     Ma_list = V_list / c_sound[fluid]
         
     # ===== Method ===== #
     # 1 for CAERO1 flat panel, 2 for curve-based grid builder
-    method = 1  # 1 for CAERO1 flat panel, 2 for curve-based grid builder
+    # wing01 is a curve-based grid, needs to be treated differently
+    if blade_name == 'wing01':
+        method = 2
+    else:
+        method = 1
 
     # Accumulate diagnostic rows for CSV export
     csv_rows = []
@@ -181,14 +184,14 @@ def main(start_time=None):
                     y1 = -0; y4 = beam_length
                     z1 = 0; z4 = 0
 
-                    plot_aerogrid = True
+                    plot = True
 
 
                 else:
                     raise ValueError(f"Unknown blade_name: {blade_name}")       
                 
                 study_case = f"{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}"
-                output_dir = FSI_path + '/panelaero_utl/CAERO1_cards'
+                output_dir = FSI_path + '/PanelAero/Qjj/CAERO1_cards'
                 wing = output_dir + '/' + study_case + '.CAERO1' # Read CAERO1 card
 
                 ## ==== Generate CAERO1 card blade (flat panel) ==== ##
@@ -201,18 +204,18 @@ def main(start_time=None):
                 aerogrid = builder.build_aerogrid()
                 aerogrid = builder.aerogrid
 
-                aerogrid = _rotation(aerogrid, alpha_r, axis='y') # rotate aerogrid
+                aerogrid = rotate_aerogrid._rotation(aerogrid, alpha_r, axis='y') # rotate aerogrid
 
                 aerogrid_dict[(n_span, n_chord_count)] = aerogrid
                 print(f"Generated aerogrid for n_span={n_span}, n_chord={n_chord_count}")
 
                 # Optional: plot each aerogrid
-                if plot_aerogrid == True:
+                if plot == True:
                     plot_aero_beam_model(aerogrid, beam_model=None)
             
             if method == 2:
                 # original curve points
-                # Dynamically import the LE/TE sub-modules from the blade's grasshopper directory
+                # Dynamically import the LE/TE sub-modules from the blade's TELE_coords directory
                 # and locate the point arrays within them.
                 import importlib
                 import importlib.util
@@ -228,11 +231,11 @@ def main(start_time=None):
                             f"SONATA.ETNZ.{blade}.{submodule_name}", mod_file
                         )
                     else:
-                        gr_dir = Path(FSI_path) / 'SONATA' / blade / 'grasshopper'
+                        gr_dir = Path(FSI_path) / 'SONATA' / blade / 'TELE_coords'
                         mod_file = gr_dir / f'{submodule_name}.py'
 
                         spec = importlib.util.spec_from_file_location(
-                            f"SONATA.{blade}.grasshopper.{submodule_name}", mod_file
+                            f"SONATA.{blade}.TELE_coords.{submodule_name}", mod_file
                         )
                     mod = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(mod)
@@ -325,7 +328,7 @@ def main(start_time=None):
 
                 # --- 3D plotting of aerogrid and curves ---
                 if plot == True:
-                    plot_aerogrid(aerogrid, le_curve, te_curve)
+                    plot_aerogrid(FSI_path, aerogrid, le_curve, te_curve, n_span, n_chord_count, blade_name, fluid, attack_angle)
 
 
     print(f"\n{'='*60}")
@@ -344,8 +347,8 @@ def main(start_time=None):
 
         print(f"Saving aerogrid at path: {output_dir}")
         
-        out_dir = f"/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI/Qjj/qjj_precomputed/{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_{DLM_method}"
-        out_dir_vlm = f"/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI/Qjj/qjj_precomputed/vjj_{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_klist_{DLM_method}"
+        out_dir = FSI_path + f"/PanelAero/Qjj/qjj_precomputed/{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_{DLM_method}"
+        out_dir_vlm = FSI_path + f"/PanelAero/Qjj/qjj_precomputed/vjj_{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_klist_{DLM_method}"
         
         print(f"Precomputing Qjj for n_span={n_span}, n_chord={n_chord_count}")
         # ensure output directory exists (precompute may expect it)
@@ -500,7 +503,7 @@ def main(start_time=None):
     print(f"\nDiagnostics CSV saved to: {csv_out_path}")
 
 
-def plot_aerogrid(aerogrid, le_curve, te_curve):
+def plot_aerogrid(FSI_path, aerogrid, le_curve, te_curve, n_span, n_chord_count, blade_name, fluid, attack_angle):
     import numpy as np
     import matplotlib.pyplot as plt
 
@@ -575,7 +578,7 @@ def plot_aerogrid(aerogrid, le_curve, te_curve):
 
     # Save plot to the qjj_precomputed folder for this study case
     try:
-        plot_out_dir = Path(f"/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI/PanelAero/Qjj/qjj_precomputed/{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_klist_new")
+        plot_out_dir = Path(FSI_path + "/PanelAero/Qjj/qjj_precomputed/{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_klist_new")
         plot_out_dir.mkdir(parents=True, exist_ok=True)
         plot_file = plot_out_dir / 'aerogrid.png'
         fig.savefig(plot_file, dpi=200)

@@ -22,7 +22,7 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         alpha_deg=attack_angle_deg,
         alpha_r=np.deg2rad(attack_angle_deg),
         V_list=np.linspace(20, 50, 20),
-        modes_to_analyze=[0, 1],
+        num_modes_flutter_egv=2,
         plot_aerobeam=True,
         aerogrid_path=aerogrid_path,
         qjj_dir=qjj_dir,

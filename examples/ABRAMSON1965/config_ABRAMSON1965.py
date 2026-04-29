@@ -55,7 +55,7 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         alpha_deg=attack_angle_deg,
         alpha_r=np.deg2rad(attack_angle_deg),
         V_list=np.concatenate([V_low, V_flutter, V_high]),
-        modes_to_analyze=[0, 1],
+        num_modes_flutter_egv=2,
 
         # ── Roger RFA ─────────────────────────────────────────────────────
         added_mass_strip_theory=True,

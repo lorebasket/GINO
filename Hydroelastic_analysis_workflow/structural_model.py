@@ -706,7 +706,7 @@ def _build_tnz_multibody_model(config):
     The arm follows the 3D spline curve defined in foil_tnz.py sections via
     the cg_sc [x, y, z] coordinates (in mm), converted to meters.
     """
-    from SONATA.ETNZ.foil_tnz import sections as tnz_sections
+    from SONATA.ETNZ.tnz_arm.foil_tnz import sections as tnz_sections
     #from FEA.hydrofoils.foil_tnz import sections as tnz_sections
     from FEA.fea_utl.multibody_assembly import assemble_multibody
     from FEA.fea_utl.rbe2_connector import assemble_rbe2_to_model, validate_rbe2_connectivity

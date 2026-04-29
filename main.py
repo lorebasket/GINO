@@ -51,7 +51,7 @@ from panelaero_utl import plotting_git
 import numpy as np
 
 
-def run_flutter_analysis_single(case_name, alpha_deg, param_overrides=None, suppress_plots=False):
+def run_flutter_analysis_single(case_name, alpha_deg, param_overrides=None):
     """
     Run flutter analysis for a single angle of attack.
     
@@ -59,7 +59,6 @@ def run_flutter_analysis_single(case_name, alpha_deg, param_overrides=None, supp
         case_name: Name of the case (e.g., 'GOLAND')
         alpha_deg: Single angle of attack in degrees
         param_overrides: Dict of parameter overrides (GJ, EIxx, rayleigh_target_zetas, xea_factor, etc.)
-        suppress_plots: If True, suppress individual plots
         
     Returns:
         flutter_results: FlutterResults object
@@ -258,19 +257,18 @@ def run_flutter_analysis_single(case_name, alpha_deg, param_overrides=None, supp
         except Exception as e:
             print(f"Warning: Could not initialize flutter force tracking: {e}")
     
-    # 7. Post-process and Visualize (individual plots if not suppressed)
-    if not suppress_plots:
-        post_processing.plot_vg_vf(flutter_results, analysis_config)
-        # Eigenvalue trajectory plot only available for PK method (not for Roger RFA)
-        if flutter_results.raw_results is not None:
-            post_processing.plot_eigenvalue_trajectory(flutter_results, flutter_results.raw_results, analysis_config)
-        else:
-            print("\nNote: Eigenvalue trajectory plot not available for Roger RFA method (uses direct eigenvalue sweep)")
-        # Stiffness/damping contributions only available for PK method
-        if flutter_results.pk_solver is not None:
-            post_processing.plot_stiffness_damping_contributions(pk_solver=flutter_results.pk_solver, config=analysis_config)
-        else:
-            print("Note: Stiffness/damping contributions plot not available for Roger RFA method")
+    # 7. Post-process and Visualize
+    post_processing.plot_vg_vf(flutter_results, analysis_config)
+    # Eigenvalue trajectory plot only available for PK method (not for Roger RFA)
+    if flutter_results.raw_results is not None:
+        post_processing.plot_eigenvalue_trajectory(flutter_results, flutter_results.raw_results, analysis_config)
+    else:
+        print("\nNote: Eigenvalue trajectory plot not available for Roger RFA method (uses direct eigenvalue sweep)")
+    # Stiffness/damping contributions only available for PK method
+    if flutter_results.pk_solver is not None:
+        post_processing.plot_stiffness_damping_contributions(pk_solver=flutter_results.pk_solver, config=analysis_config)
+    else:
+        print("Note: Stiffness/damping contributions plot not available for Roger RFA method")
     
     print(f"✓ Flutter analysis completed for α = {alpha_deg}°")
     if flutter_results.flutter_speed is not None:
@@ -290,10 +288,8 @@ if __name__ == "__main__":
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""
 Examples:
-  python main.py GOLAND                          # Run standard flutter analysis
-  python main.py tnz_multibody                   # Run flutter with multibody coupling
-  python main.py --hybrid tnz_multibody          # Run hybrid non-circulatory operator analysis
-  python main.py --hybrid-only tnz_multibody     # Run only hybrid operator (no flutter)
+  python main.py GOLAND
+  python main.py tnz_multibody
         """
     )
     parser.add_argument(
@@ -302,22 +298,7 @@ Examples:
         default="GOLAND",
         help="Analysis case name (e.g. GOLAND, tnz_multibody, grid_conv). Default: GOLAND",
     )
-    parser.add_argument(
-        "--hybrid",
-        action="store_true",
-        help="Use hybrid non-circulatory operator in flutter analysis"
-    )
-    parser.add_argument(
-        "--hybrid-only",
-        action="store_true",
-        help="Run only hybrid operator analysis (skip flutter)"
-    )
-    parser.add_argument(
-        "--skip-plots",
-        action="store_true",
-        help="Suppress individual plots during analysis"
-    )
-    
+
     args = parser.parse_args()
     case_name = args.case_name
 
@@ -333,52 +314,17 @@ Examples:
 
     print(f"\n{'='*70}")
     print(f"Running Analysis for: {case_name}")
-    if args.hybrid or args.hybrid_only:
-        print(f"Mode: HYBRID NON-CIRCULATORY OPERATOR")
-    else:
-        print(f"Mode: STANDARD FLUTTER ANALYSIS")
     print(f"Log file: {log_filename}")
     print(f"{'='*70}\n")
 
     try:
-        # === HYBRID-ONLY MODE ===
-        if args.hybrid_only:
-            print("Executing hybrid non-circulatory operator analysis only...\n")
-            hybrid_results = run_hybrid_nc_analysis(case_name)
-            
-            if hybrid_results:
-                print("\n" + "="*70)
-                print("HYBRID ANALYSIS COMPLETE")
-                print("="*70)
-                print(f"\nResults:")
-                print(f"  - Q_final saved: {hybrid_results['saved_files'].get('Q_final', 'N/A')}")
-                print(f"  - Energy analysis: {hybrid_results['saved_files'].get('energy_contributions', 'N/A')}")
-                print(f"  - Decomposition: {hybrid_results['saved_files'].get('decomposition', 'N/A')}")
-                print(f"\nNext step: Use Q_final in flutter analysis\n")
-        
-        # === STANDARD OR HYBRID-ENABLED FLUTTER ANALYSIS ===
-        else:
-            # Load config to get the alpha_deg (single value expected for direct run)
-            _analysis_config = config.get_config(case_name)
-            alpha_deg = _analysis_config.alpha_deg
-            if isinstance(alpha_deg, (list, tuple, np.ndarray)):
-                alpha_deg = alpha_deg[0]
+        # Load config to get the alpha_deg (single value expected for direct run)
+        _analysis_config = config.get_config(case_name)
+        alpha_deg = _analysis_config.alpha_deg
+        if isinstance(alpha_deg, (list, tuple, np.ndarray)):
+            alpha_deg = alpha_deg[0]
 
-            # If hybrid mode requested, run hybrid operator analysis first
-            if args.hybrid and _analysis_config.hybrid_nc_operator:
-                print("Pre-computing hybrid operator...\n")
-                hybrid_results = run_hybrid_nc_analysis(case_name)
-
-                if hybrid_results is None:
-                    print("\nWarning: Hybrid operator computation failed, falling back to standard analysis\n")
-                else:
-                    print("\n✓ Hybrid operator ready, proceeding with flutter analysis...\n")
-
-            run_flutter_analysis_single(
-                case_name,
-                alpha_deg,
-                suppress_plots=args.skip_plots
-            )
+        run_flutter_analysis_single(case_name, alpha_deg)
     
     finally:
         sys.stdout = logger.terminal

@@ -1,4 +1,4 @@
-name: 4_NACA0015
+name: NACA0015
 description: Fem validation example, NACA0015 airfoil full span beam, SHanghai paper
 
 components:

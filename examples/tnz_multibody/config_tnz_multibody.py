@@ -21,7 +21,7 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
 
     return AnalysisConfig(
         'tnz_multibody',
-
+        
         # ── Geometry ──────────────────────────────────────────────────────
         chord=0.4,
         boot_length=0.300,
@@ -82,13 +82,14 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         rbe2_connector_type='rigid_links',
         rbe2_offset_tolerance=1e-9,
 
-        # ── Visualization ─────────────────────────────────────────────────
-        plot_displacements_by_beam=True,
-
         # ── Aerodynamic grid ──────────────────────────────────────────────
         nspan=nspan,
         nchord=nchord,
         qjj_dir=qjj_dir,
         vjj_dir=qjj_dir,
         aerogrid_path=aerogrid_path,
+
+        # ── Flutter sweep ─────────────────────────────────────────────────
+        V_list=np.linspace(5, 45, 40),
+        num_modes_flutter_egv=4,
     )

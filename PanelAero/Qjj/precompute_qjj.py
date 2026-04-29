@@ -14,9 +14,7 @@ def precompute_qjj_grid(FSI_path, aerogrid, k_list, Ma_list, out_dir,
         verify_existing: If True, check existing files for NaN/Inf and recompute if needed
         dlm_method: Integration method for DLM ('parabolic' or 'quartic')
     """
-    import sys
-    sys.path.append(FSI_path + '/PanelAero')
-    from panelaero_utl import DLM
+    from panelaero import DLM
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

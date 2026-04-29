@@ -5,6 +5,7 @@ import csv
 def main(start_time=None):
 
     import sys
+    import os
     import numpy as np
     from pathlib import Path
     from precompute_qjj import precompute_qjj_grid, check_existing_qjj_files
@@ -13,7 +14,7 @@ def main(start_time=None):
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
     import math
 
-    FSI_path = '/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI'
+    FSI_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     sys.path.extend([
         FSI_path,
@@ -38,7 +39,7 @@ def main(start_time=None):
     # Multiple blade names: an aerogrid is built for every blade in this list.
     blade_names = ['tnz_boot', 'tnz_foil_dx', 'tnz_foil_sx']
     fluid = 'water'
-    nspan = [16]  # number of spanwise panels
+    nspan = [5]  # number of spanwise panels
     AR = [0.5]    # aspect ratio
     DLM = True
     VLM = False
@@ -101,11 +102,11 @@ def main(start_time=None):
 
                 def _import_submodule(blade, submodule_name):
                     """Import LE_curve_points or TE_curve_points from the blade's dir."""
-                    gr_dir = Path(FSI_path) / 'SONATA' / '8_tnz' / blade
+                    gr_dir = Path(FSI_path) / 'SONATA' / 'ETNZ' / blade
                     mod_file = gr_dir / f'{submodule_name}.py'
 
                     spec = importlib.util.spec_from_file_location(
-                        f"SONATA.8_tnz.{blade}.{submodule_name}", mod_file
+                        f"SONATA.ETNZ.{blade}.{submodule_name}", mod_file
                     )
                     mod = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(mod)
@@ -267,7 +268,7 @@ def main(start_time=None):
 
                     try:
                         plot_out_dir = Path(
-                            f"/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI/Qjj/qjj_precomputed"
+                            FSI_path + "/PanelAero/Qjj/qjj_precomputed"
                             f"/{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_{DLM_method}"
                         )
                         plot_out_dir.mkdir(parents=True, exist_ok=True)
@@ -469,7 +470,7 @@ def main(start_time=None):
         ax_m.set_xlabel('X')
         ax_m.set_ylabel('Y')
         ax_m.set_zlabel('Z')
-        ax_m.set_title(f'Merged aerogrid — {len(aerogrid_dict)} sub-grid(s)  |  total panels: {aerogrid_combined["n"]}')
+        ax_m.set_title(f'Combined aerogrid — {len(aerogrid_dict)} sub-grid(s)  |  total panels: {aerogrid_combined["n"]}')
         ax_m.legend(fontsize=8)
         plt.tight_layout()
 
@@ -494,7 +495,7 @@ def main(start_time=None):
         # Save
         try:
             merged_plot_dir = Path(
-                "/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI/Qjj/qjj_precomputed"
+                FSI_path + "/PanelAero/Qjj/qjj_precomputed"
             )
             merged_plot_dir.mkdir(parents=True, exist_ok=True)
             merged_plot_file = merged_plot_dir / f"aerogrid_merged_{'_'.join(blade_names)}.png"
@@ -525,11 +526,11 @@ def main(start_time=None):
     _, n_span_first, n_chord_first = first_key
 
     out_dir = (
-        f"/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI/Qjj/qjj_precomputed"
+        FSI_path + "/PanelAero/Qjj/qjj_precomputed"
         f"/MULTI_{blades_tag}_{fluid}_alpha{attack_angle[0]}_nspan{n_span_first}_nchord{n_chord_first}_{DLM_method}_leoffset{-0.2+foil_chordwise_offset:.1f}"
     )
     out_dir_vlm = (
-        f"/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI/Qjj/qjj_precomputed"
+        FSI_path + "/PanelAero/Qjj/qjj_precomputed"
         f"/vjj_MULTI_{blades_tag}_{fluid}_alpha{attack_angle[0]}_nspan{n_span_first}_nchord{n_chord_first}_{DLM_method}_leoffset{-0.2+foil_chordwise_offset:.1f}"
     )
 
@@ -537,7 +538,7 @@ def main(start_time=None):
 
     # Save the combined aerogrid for downstream use
     try:
-        aerogrid_file = _Path(out_dir) / 'aerogrid_combined.npz'
+        aerogrid_file = _Path(out_dir) / 'aerogrid.npz'
         np.savez_compressed(aerogrid_file, **aerogrid_combined)
         print(f"  Saved combined aerogrid to {aerogrid_file}")
     except Exception as _e:

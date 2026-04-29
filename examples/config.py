@@ -29,9 +29,8 @@ GLOBAL_FLAGS = {
     'nchord':                           10,
 
     # ── Modal analysis ────────────────────────────────────────────────────────
-    'num_modes_egv':                    10,
-    'num_modes_flutter_egv':            4,
-    'modes_to_analyze':                 [0, 1, 2, 3],
+    'num_modes_egv':                    10, # number of computed modes dry analysis
+    'num_modes_flutter_egv':            4,  # number of modes used in flutter analysis
 
     # ── Fluid properties ──────────────────────────────────────────────────────
     'c_sound':  {'air': 332.5, 'water': 1484.0},   # [m/s]  at ~2000 m
@@ -53,9 +52,8 @@ GLOBAL_FLAGS = {
     'plot_displacements_by_beam':       False,
     'animate_modes':                    False,
     'animation_frames':                 20,
-    'modes_to_visualize':               [0, 1, 2, 3],
     'mode_scale_factor':                0.5,
-    'classify_modes':                   True,
+    'classify_modes':                   True,   # analyses modes energy distribution
     'show_eigen_plot':                  True,
 
     # ── Force computation ─────────────────────────────────────────────────────
@@ -72,11 +70,19 @@ GLOBAL_FLAGS = {
     'fluid_at_rest':                    False,
     'modal_capytaine_dofs':             False,
 
+    # ── FLUTTER analysis method ───────────────────────────────────────────────
+    'pk_method':                        True,   # P-K method aeroelastic analysis
+    'roger_fit':                        False,  # Roger RFA hydroelastic analysis
+
     # ── P-K method — flags ────────────────────────────────────────────────────
-    'pk_method':                        False,
     'mac_matching':                     True,
     'last_converged_mode_matching':     True,
     'k_guess':                          0.001,
+
+    # ── Roger RFA ─────────────────────────────────────────────────────────────
+    'k_list':                           np.linspace(0.001, 50, 100),
+    'n_lag':                            3,
+    'blag':                             np.linspace(0.3, 1, 3),
 
     # ── P-K solver — iteration & mode-matching parameters ────────────────────
     'pk_tol':                           1e-2,
@@ -97,14 +103,8 @@ GLOBAL_FLAGS = {
     'rayleigh_mode_ids':                (0, 1),
     'rayleigh_target_zetas':            (0.0, 0.0),
 
-    # ── Roger RFA ─────────────────────────────────────────────────────────────
-    'roger_fit':                        False,
-    'k_list':                           np.linspace(0.001, 50, 100),
-    'n_lag':                            3,
-    'blag':                             np.linspace(0.3, 1, 3),
-
     # ── Added mass ────────────────────────────────────────────────────────────
-    'strip_theory_added_mass':          False,
+    # False = aeroelastic analysis, True = hydroelastic analysis
     'added_mass_strip_theory':          False,
 
     # ── Hybrid non-circulatory operator ──────────────────────────────────────
@@ -147,6 +147,12 @@ class AnalysisConfig:
             setattr(self, key, value)
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+        # Auto-derive modes lists from num_modes_flutter_egv unless explicitly overridden
+        if 'modes_to_analyze' not in kwargs:
+            self.modes_to_analyze = list(range(self.num_modes_flutter_egv))
+        if 'modes_to_visualize' not in kwargs:
+            self.modes_to_visualize = list(range(self.num_modes_flutter_egv))
 
 
 # ══════════════════════════════════════════════════════════════════════════════

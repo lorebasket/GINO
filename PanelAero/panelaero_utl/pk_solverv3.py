@@ -7,7 +7,7 @@ from numpy.linalg import solve as lin_solve
 import warnings
 
 # Import utilities
-from .pk_method_utl import mode_matching, initial_k_guess, V_tracking
+from .pk_method_utl import mode_matching
 
 
 class PKSolverV3:

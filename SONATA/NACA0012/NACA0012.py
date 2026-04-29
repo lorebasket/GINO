@@ -4,7 +4,6 @@ Created on Sat Jun 28 18:06 2025
 
 @author: Lorenzo Valle
 """
-import sys
 import os
 import time
 import platform
@@ -15,15 +14,6 @@ import numpy as np
 export_folder = os.path.join(os.getcwd(), "csv_export")
 csv_path = os.path.join(export_folder, "NACA0012_beam_sections.csv")
 
-# Add ANBA4 path to Python path
-anba4_path = '/home/lorebasket/FSI/anba4'
-if anba4_path not in sys.path:
-    sys.path.insert(0, anba4_path)
-
-# Add SONATA path to Python path
-sonata_path = '/home/lorebasket/FSI/SONATA/9_gitclone'
-if sonata_path not in sys.path:
-    sys.path.insert(0, sonata_path)
 
 # Configure matplotlib to not use LaTeX (to avoid LaTeX missing error)
 import matplotlib

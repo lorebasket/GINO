@@ -4,21 +4,10 @@ Created on Sat Jun 28 18:06 2025
 
 @author: Lorenzo Valle
 """
-import sys
 import os
 import time
 import platform
 
-# Add ANBA4 path to Python path
-anba4_path = '/home/lorebasket/FSI/anba4'
-if anba4_path not in sys.path:
-    sys.path.insert(0, anba4_path)
-
-# Add SONATA path to Python path
-
-sonata_path = '/home/lorebasket/FSI/SONATA'
-if sonata_path not in sys.path:
-    sys.path.insert(0, sonata_path)
 
 # Configure matplotlib to not use LaTeX (to avoid LaTeX missing error)
 import matplotlib
@@ -43,8 +32,8 @@ print('Current working directory is:', os.getcwd())
 
 # ===== Provide Path Directory & Yaml Filename ===== #
 run_dir = os.path.dirname( os.path.realpath(__file__) ) + os.sep
-job_str = '4_NACA0015.yaml'  # note: for better meshing convergence, units specified in yaml are in 'mm' instead of 'm'
-job_name = '4_NACA0015'
+job_str = 'NACA0015.yaml'  # note: for better meshing convergence, units specified in yaml are in 'mm' instead of 'm'
+job_name = 'NACA0015'
 
 filename_str = run_dir + job_str
 

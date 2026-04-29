@@ -1,9 +1,10 @@
 # FLUTTER-FSI
 
-Hydroelastic flutter analysis framework for lifting surfaces in air and water.  
-Developed as part of a Master's thesis at Politecnico di Torino.
+An Opensource Framework for the hydroelastic analysis of composite beams.  
+Developed as part of a Master's thesis at Politecnico di Torino, in collaboration with:
+Pietro Casalone (Politecnico di Torino), Davide Tagliapietra (Shickler Tagliapietra Yacht Enngineering), Luca Valsecchi (Toolspole) and Paolo Motta (Toolspole).
 
-The framework couples a **finite element beam model** (FEA), an **unsteady aerodynamic panel method** (DLM/VLM), and a **flutter solver** (P-K method or Roger RFA) to predict the flutter onset speed and frequency of hydrofoils, wings, and multi-body structures.
+The framework couples a **finite element beam model** (FEA), an **unsteady aerodynamic panel method** (DLM/VLM), a **boundary element method** (BEM), and a **flutter solver** (P-K method or Roger RFA) to predict the flutter onset speed and frequency of hydrofoils, wings, and multi-body structures.
 
 ---
 
@@ -77,9 +78,6 @@ python main.py hollowell
 | Option | Description |
 |---|---|
 | `case_name` | Name of the analysis case (default: `GOLAND`) |
-| `--hybrid` | Use hybrid non-circulatory operator before flutter analysis |
-| `--hybrid-only` | Run only the hybrid operator analysis (skip flutter) |
-| `--skip-plots` | Suppress individual plots during the run |
 
 Output (plots and logs) is saved to `output_plots/`.
 
@@ -96,11 +94,11 @@ Output (plots and logs) is saved to `output_plots/`.
         ↓
 3. Structural analysis         Dry natural frequencies and mode shapes
         ↓
-4. (optional) Wet modes        Fluid-at-rest frequency shift (added mass)
+4. (optional) Wet modes        Fluid-at-rest frequency shift (non-circulatory added mass & damping)
         ↓
 5. Build aerodynamic model     Load precomputed aerogrid and Qjj matrices
         ↓
-6. Aero-structural coupling    Spline interpolation matrix (beam ↔ aerogrid)
+6. Aero-structural coupling    Z matrix coupling (beam ↔ aerogrid)
         ↓
 7. Flutter solver              P-K method or Roger RFA eigenvalue sweep
         ↓

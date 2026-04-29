@@ -1,6 +1,8 @@
 # PanelAero — Aerodynamic Influence Coefficients Precomputation
 
-This module builds the aerodynamic panel grid and precomputes the **Qjj matrices** (generalised aerodynamic force matrices) using the **Doublet Lattice Method (DLM)** or the **Vortex Lattice Method (VLM)**. These matrices are stored on disk and loaded at runtime by `main.py` during the flutter analysis.
+> **Dependency:** `DLM` and `VLM` are provided by the [`PanelAero`](https://github.com/DLR-AE/PanelAero) package (installed via `pip install PanelAero` in the `sonata-env` conda environment). Do not copy those files locally.
+
+This module builds the aero/hydro-dynamic panel grid and precomputes the **Qjj matrices** (generalised aero/hydro-dynamic force matrices) using the **Doublet Lattice Method (DLM)** or the **Vortex Lattice Method (VLM)**. These matrices are stored on disk and loaded at runtime by `main.py` during the flutter analysis.
 
 ---
 
@@ -16,7 +18,6 @@ PanelAero/
 │   └── qjj_precomputed/             ← (not uploaded) Output folder
 │
 └── panelaero_utl/
-    ├── DLM.py                       ← Doublet Lattice Method implementation
     ├── build_aeromodel.py           ← CAERO1-based flat panel grid builder
     ├── build_aeromodel_crvs.py      ← Curve-based aerogrid builder (for complex shapes)
     ├── CAERO1_cards/                ← Generated CAERO1 panel definition files
@@ -79,7 +80,7 @@ Available `blade_name` values (method 1 — flat CAERO1 panel):
 | `NACA0003` | NACA0003 thin hydrofoil |
 | `1x1grid` | Unit square panel (debugging) |
 
-For complex 3D geometries (e.g. ETNZ foils), set `method = 2` and provide LE/TE curve point files via `blade_name`.
+For more detailed geometries (e.g. `wing01`), `executer.py` supports a **curve-based aerogrid** (method 2): instead of a flat CAERO1 panel, the grid is built by interpolating between explicit **Leading Edge (LE)** and **Trailing Edge (TE)** 3-D point clouds. The LE/TE coordinates are read from two Python files located in `SONATA/<blade_name>/TELE_coords/` (`LE_curve_points.py` and `TE_curve_points.py`), each exposing a list or array of `[x, y, z]` points in millimetres. When `blade_name == 'wing01'` the method is selected automatically and the Qjj matrices are precomputed on the resulting panel grid exactly as in method 1.
 
 ### 2. Set the reduced frequency and velocity ranges
 

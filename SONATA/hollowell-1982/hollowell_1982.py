@@ -10,14 +10,9 @@ Created on Mo Oct 07 11:18:28 2019
 """
 
 import os
-import sys
 import numpy as np
 import time
 
-# Add the workspace SONATA to the path FIRST to override installed version
-workspace_sonata = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if workspace_sonata not in sys.path:
-    sys.path.insert(0, workspace_sonata)
 
 from SONATA.classBlade import Blade
 from SONATA.utl.beam_struct_eval import beam_struct_eval

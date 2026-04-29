@@ -75,7 +75,7 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         alpha_deg=attack_angle_deg,
         alpha_r=np.deg2rad(attack_angle_deg),
         V_list=np.linspace(0.01, 50, 25),
-        modes_to_analyze=[0, 1],
+        num_modes_flutter_egv=2,
         num_modes=2,
 
         # ── Constrained nodes ─────────────────────────────────────────────
