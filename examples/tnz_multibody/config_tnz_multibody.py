@@ -90,6 +90,6 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         aerogrid_path=aerogrid_path,
 
         # ── Flutter sweep ─────────────────────────────────────────────────
-        V_list=np.linspace(5, 45, 40),
+        V_list=np.linspace(8, 45, 40),
         num_modes_flutter_egv=4,
     )

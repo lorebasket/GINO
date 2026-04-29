@@ -9,10 +9,11 @@ from datetime import datetime
 FSI_path = os.path.dirname(os.path.abspath(__file__))
 
 sys.path.extend([
-    FSI_path,
-    os.path.join(FSI_path, 'PanelAero'),           # exposes panelaero_utl as a package
-    os.path.join(FSI_path, 'FEA'),
-    os.path.join(FSI_path, 'FEA', 'fea_utl'),
+    FSI_path,                                                   # for examples, COUPLING, STRUCTURE as top-level packages
+    os.path.join(FSI_path, 'STRUCTURE'),                       # exposes FEA package
+    os.path.join(FSI_path, 'STRUCTURE', 'FEA', 'fea_utl'),    # direct fea_utl module access
+    os.path.join(FSI_path, 'FLUID', 'PanelAero'),             # exposes panelaero_utl package
+    os.path.join(FSI_path, 'FLUID'),                          # exposes aerodynamic_model module
 ])
 
 
@@ -36,29 +37,25 @@ class Logger:
 
 
 from examples import config
-from Hydroelastic_analysis_workflow import (
-    structural_model,
-    structural_analysis,
-    aerodynamic_model,
-    aero_structural_coupling,
-    flutter_solver,
-    post_processing,
-)
+from FEA import structural_model
+from FEA import structural_analysis
+import aerodynamic_model
+from COUPLING import aero_structural_coupling
+from COUPLING import flutter_solver
+from COUPLING.hydroelastic_utl import post_processing
 from FEA.fea_utl import force_analysis
-
 from FEA.fea_utl import mode_shape_analysis
 from panelaero_utl import plotting_git
 import numpy as np
 
 
-def run_flutter_analysis_single(case_name, alpha_deg, param_overrides=None):
+def run_flutter_analysis_single(case_name, alpha_deg):
     """
     Run flutter analysis for a single angle of attack.
     
     Args:
         case_name: Name of the case (e.g., 'GOLAND')
         alpha_deg: Single angle of attack in degrees
-        param_overrides: Dict of parameter overrides (GJ, EIxx, rayleigh_target_zetas, xea_factor, etc.)
         
     Returns:
         flutter_results: FlutterResults object
@@ -66,47 +63,12 @@ def run_flutter_analysis_single(case_name, alpha_deg, param_overrides=None):
     """
     ## == 1. LOAD CONFIGURATION == ##
     analysis_config = config.get_config(case_name)
-    
-    # Override alpha to be a single value
+
+    # Normalise alpha: stamp the requested value and ensure alpha_r is a tuple
     analysis_config.alpha_deg = alpha_deg
     analysis_config.alpha_r = (np.deg2rad(alpha_deg),)
-    
-    # Apply parameter overrides if provided
-    if param_overrides:
-        for param_name, param_value in param_overrides.items():
-            setattr(analysis_config, param_name, param_value)
-            print(f"  Override: {param_name} = {param_value}")
-    
-    # Update paths for this specific alpha
-    QJJ_path_local = os.path.join(FSI_path, 'PanelAero', 'Qjj', 'qjj_precomputed')
-    fluid = analysis_config.fluid
-    nspan = analysis_config.nspan
-    nchord = analysis_config.nchord
-    xea_factor = analysis_config.xea_factor  # Get potentially overridden value
-    
-    # Format alpha to match folder naming
-    # Keep decimals for 0.0 and 0.05, but use integer for 2
-    if isinstance(alpha_deg, float) and alpha_deg == int(alpha_deg) and alpha_deg != 0.0:
-        # Integer value but not zero (e.g., 2.0 -> "2")
-        alpha_str = str(int(alpha_deg))
-    else:
-        # Keep as is for 0.0, 0.05, etc.
-        alpha_str = str(alpha_deg)
-    
-    # Check if xea_factor was overridden (for elastic axis sweep)
-    # If so, use the _shoff{xea_factor} naming convention
-    if param_overrides and 'xea_factor' in param_overrides:
-        dlm_method = analysis_config.dlm_method
-        base_name = f"{case_name}_{fluid}_alpha{alpha_str}_nspan{nspan}_nchord{nchord}_klist_{dlm_method}_shoff{xea_factor}"
-        vjj_base_name = f"vjj_{case_name}_{fluid}_alpha{alpha_str}_nspan{nspan}_nchord{nchord}_klist_{dlm_method}"
-    
-        analysis_config.qjj_dir = os.path.join(QJJ_path_local, base_name)
-        analysis_config.vjj_dir = os.path.join(QJJ_path_local, vjj_base_name)
-        analysis_config.aerogrid_path = os.path.join(analysis_config.qjj_dir, "aerogrid.npz")
-    
+
     print(f"\nLoaded configuration for: {analysis_config.name}, α = {alpha_deg}°")
-    if param_overrides and 'xea_factor' in param_overrides:
-        print(f"  Aerogrid path: .../{base_name}/")
     
     # Check if aerogrid exists
     if not os.path.exists(analysis_config.aerogrid_path):
@@ -303,7 +265,7 @@ Examples:
     case_name = args.case_name
 
     # Setup logging to file
-    log_dir = os.path.join(FSI_path, 'output_plots')
+    log_dir = os.path.join(FSI_path, 'output_data')
     os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -1,9 +1,13 @@
 # GINO - An Opensource Framework for the hydroelastic analysis of composite hydrofoils.
 
+[![License: Dual%20(GPLv3%20or%20Commercial)](https://img.shields.io/badge/License-Dual%20GPLv3%20or%20Commercial-blue.svg)](LICENSE)
+
 Developed as part of a Master's thesis at Politecnico di Torino, in collaboration with:
 Pietro Casalone (Politecnico di Torino), Davide Tagliapietra (Shickler Tagliapietra Yacht Enngineering), Luca Valsecchi (Toolspole) and Paolo Motta (Toolspole).
 
-The framework couples a **finite element beam model** (FEA), an **unsteady aerodynamic panel method** (DLM/VLM), a **boundary element method** (BEM), and a **flutter solver** (P-K method or Roger RFA) to predict the flutter onset speed and frequency of hydrofoils, wings, and multi-body structures.
+Copyright (C) 2025 Lorenzo Baraltech — Dual-licensed under [GPL-3.0-or-later](LICENSE) or a separate [commercial license](COMMERCIAL_LICENSE.md).
+
+The framework couples a **finite element beam model** (FEA), an **aerodynamic panel method** (DLM), a **boundary element method** (BEM), and a **flutter solver** (P-K method or Roger RFA) to predict the flutter onset speed and frequency of hydrofoils, wings, and multi-body structures.
 
 ---
 
@@ -46,13 +50,70 @@ FSI/
 
 ## Prerequisites
 
-Install the required Python packages (a conda environment is recommended):
+A **conda environment** is strongly recommended (Python 3.9–3.11).
+
+---
+
+### 1. SONATA — cross-sectional beam analysis
+
+SONATA computes the 6×6 cross-sectional stiffness and mass matrices from blade geometry YAML files.  
+It is required only for cases listed under *"Cases that require SONATA outputs"* (e.g. `GOLAND_sonata`, `tnz_multibody`, `wing01`).
+
+Clone it into `SONATA/9_gitclone/`:
 
 ```bash
-pip install numpy scipy matplotlib
+cd SONATA
+git clone https://github.com/WISDEM/SONATA 9_gitclone
 ```
 
-For cases using SONATA-derived structural properties, additional dependencies are required — see [`SONATA/README.md`](SONATA/README.md).
+> See [`SONATA/README.md`](SONATA/README.md) for the full workflow and per-script path configuration.
+
+---
+
+### 2. PanelAero — aerodynamic influence coefficients (DLM)
+
+PanelAero provides the Doublet Lattice Method and Vortex Lattice Method solvers used to precompute the Qjj matrices.  
+Install via pip:
+
+```bash
+pip install PanelAero
+```
+
+Repository: [github.com/DLR-AE/PanelAero](https://github.com/DLR-AE/PanelAero)
+
+> See [`PanelAero/README.md`](PanelAero/README.md) for the Qjj precomputation workflow.
+
+---
+
+### 3. ANBA4 — cross-sectional stiffness solver (FEniCS-based)
+
+ANBA4 is the finite-element solver called by SONATA. It requires **FEniCS** (`dolfin`).  
+Install FEniCS first via conda (Linux / WSL only):
+
+```bash
+conda create -n sonata-env -c conda-forge fenics python=3.10
+conda activate sonata-env
+```
+
+Then clone ANBA4 into `FSI/anba4/`:
+
+```bash
+git clone https://github.com/ANBA4/anba4 anba4
+```
+
+> ANBA4 and FEniCS are only needed when running SONATA scripts. The main flutter analysis (`main.py`) does **not** require them.
+
+---
+
+### 4. Python packages
+
+Install all remaining dependencies with:
+
+```bash
+pip install -r requirements.txt
+```
+
+This covers: `numpy`, `scipy`, `matplotlib`, `pandas`, `pyyaml`, and `PanelAero`.
 
 ---
 
@@ -174,6 +235,56 @@ Results are saved in `output_plots/`:
 - Eigenvalue trajectory plots
 - Mode shape visualisations (if enabled in config)
 - Displacement/force CSVs (if enabled in config)
+
+---
+
+## Third-Party Software & Licenses
+
+This framework is built on top of two external open-source libraries that are dynamically linked (called at runtime) but are **not** distributed as part of this repository. Their source code, copyright, and license terms remain entirely with their respective authors.
+
+---
+
+### PanelAero — BSD 3-Clause License
+
+**Repository:** [github.com/DLR-AE/PanelAero](https://github.com/DLR-AE/PanelAero)  
+**Author:** Arne Voß, Deutsches Zentrum für Luft- und Raumfahrt e.V. (DLR)  
+**License:** [BSD 3-Clause "New" or "Revised" License](https://github.com/DLR-AE/PanelAero/blob/master/LICENSE)
+
+PanelAero is used in this project to compute aerodynamic influence coefficient matrices (Qjj) via the Doublet Lattice Method (DLM) and Vortex Lattice Method (VLM). It is installed as a standard Python package (`pip install PanelAero`) and called through the scripts in `PanelAero/Qjj/`.
+
+**Compliance statement:** The BSD 3-Clause License permits free use, modification, and integration into other projects, provided that the copyright notice and license text are retained. This framework does not redistribute PanelAero source code or binaries. The copyright notice is reproduced here in accordance with clause 1 of the license:
+
+> Copyright (c) 2020–2022, Deutsches Zentrum für Luft- und Raumfahrt e.V.  
+> All rights reserved.
+
+The name of DLR is not used to endorse or promote this project, in compliance with clause 3 of the license.
+
+---
+
+### SONATA — GNU Lesser General Public License v3 (LGPL-3.0)
+
+**Repository:** [github.com/WISDEM/SONATA](https://github.com/WISDEM/SONATA) / [github.com/NLRWindSystems/SONATA](https://github.com/NLRWindSystems/SONATA)  
+**License:** [GNU Lesser General Public License v3.0](https://github.com/NLRWindSystems/SONATA/blob/master/license.txt)
+
+SONATA is used in this project to compute the 6×6 cross-sectional stiffness and mass matrices of composite beam sections from YAML geometry files. It is cloned separately by the user into `SONATA/9_gitclone/` and is only required for specific analysis cases (e.g. `GOLAND_sonata`, `tnz_multibody`, `wing01`). The main flutter pipeline (`main.py`) does **not** depend on SONATA at runtime.
+
+**Compliance statement:** The GNU LGPLv3 permits use of the library in a larger application without imposing the LGPL on the application itself, provided that:
+1. The user can replace the LGPL-covered library with a modified version (satisfied: SONATA is cloned independently by the user, not bundled here).
+2. The use of SONATA is prominently disclosed and the license is referenced (satisfied: see above).
+
+This framework does **not** distribute a modified copy of SONATA. No SONATA source code is included in this repository. The LGPL license terms therefore do **not** extend to the original code of this framework.
+
+---
+
+### Summary
+
+| Software | License | Usage mode | Code included in this repo |
+|---|---|---|---|
+| **This framework (GINO)** | **Dual: GPL-3.0-or-later OR Commercial** | — | Yes |
+| PanelAero | BSD 3-Clause | `pip install` + called at runtime | No |
+| SONATA | GNU LGPL v3 | Cloned separately + called at runtime | No |
+
+Both libraries are used in compliance with their respective licenses. Licensing of this framework itself is defined by the project dual-license terms in [`LICENSE`](LICENSE) and [`COMMERCIAL_LICENSE.md`](COMMERCIAL_LICENSE.md).
 
 ---
 

@@ -13,9 +13,9 @@ import importlib.util
 
 # Derive the FSI root: FSI/examples/config.py → FSI/
 FSI_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QJJ_path = os.path.join(FSI_path, 'PanelAero', 'Qjj', 'qjj_precomputed')
+QJJ_path = os.path.join(FSI_path, 'FLUID', 'PanelAero', 'Qjj', 'qjj_precomputed')
 
-sys.path.append(os.path.join(FSI_path, 'SONATA', '6_AGARD445.6', 'csv_export'))
+sys.path.append(os.path.join(FSI_path, 'STRUCTURE', 'SONATA', '6_AGARD445.6', 'csv_export'))
 
 # ══════════════════════════════════════════════════════════════════════════════
 # GLOBAL FLAGS — interchangeable defaults shared across all analysis cases.
@@ -24,12 +24,12 @@ sys.path.append(os.path.join(FSI_path, 'SONATA', '6_AGARD445.6', 'csv_export'))
 GLOBAL_FLAGS = {
 
     # ── Beam model ────────────────────────────────────────────────────────────
-    'n_elements':                       150,
+    'n_elements':                       400,
     'nspan':                            20,
     'nchord':                           10,
 
     # ── Modal analysis ────────────────────────────────────────────────────────
-    'num_modes_egv':                    10, # number of computed modes dry analysis
+    'num_modes_egv':                    5, # number of computed modes dry analysis
     'num_modes_flutter_egv':            4,  # number of modes used in flutter analysis
 
     # ── Fluid properties ──────────────────────────────────────────────────────
@@ -38,13 +38,13 @@ GLOBAL_FLAGS = {
 
     # ── Output & saving ───────────────────────────────────────────────────────
     'save_plots':                       True,
-    'output_dir':                       os.path.join(FSI_path, 'output_plots'),
+    'output_dir':                       os.path.join(FSI_path, 'output_data'),
     'save_global_matrices':             False,
     'save_matrices':                    False,
     'save_modal_data':                  False,
 
     # ── Visualization ─────────────────────────────────────────────────────────
-    'plot_mode_shapes':                 False,
+    'plot_mode_shapes':                 True,
     'plot_aerobeam':                    False,
     'plot_full_wing':                   False,
     'plot_chordwise_strip':             False,
@@ -53,7 +53,7 @@ GLOBAL_FLAGS = {
     'animate_modes':                    False,
     'animation_frames':                 20,
     'mode_scale_factor':                0.5,
-    'classify_modes':                   True,   # analyses modes energy distribution
+    'classify_modes':                   False,   # analyses modes energy distribution
     'show_eigen_plot':                  True,
 
     # ── Force computation ─────────────────────────────────────────────────────
@@ -75,8 +75,8 @@ GLOBAL_FLAGS = {
     'roger_fit':                        False,  # Roger RFA hydroelastic analysis
 
     # ── P-K method — flags ────────────────────────────────────────────────────
-    'mac_matching':                     True,
-    'last_converged_mode_matching':     True,
+    'mac_matching':                     False,
+    'last_converged_mode_matching':     False,
     'k_guess':                          0.001,
 
     # ── Roger RFA ─────────────────────────────────────────────────────────────
@@ -87,7 +87,7 @@ GLOBAL_FLAGS = {
     # ── P-K solver — iteration & mode-matching parameters ────────────────────
     'pk_tol':                           1e-2,
     'pk_fXK0':                          0.618,
-    'pk_fRLX':                          0.5,
+    'pk_fRLX':                          0.6,
     'pk_freq_margin':                   0.05,
     'pk_perturb_k':                     1,
     'pk_max_iter':                      150,
@@ -122,7 +122,7 @@ GLOBAL_FLAGS = {
     ]),
 
     # ── Aerodynamic panel cards ───────────────────────────────────────────────
-    'caero_card_dir': os.path.join(FSI_path, 'PanelAero', 'panelaero_utl', 'CAERO1_cards'),
+    'caero_card_dir': os.path.join(FSI_path, 'FLUID', 'PanelAero', 'panelaero_utl', 'CAERO1_cards'),
 
     # ── Aerodynamic solver ────────────────────────────────────────────────────
     'aero_source':                      'panelaero',
@@ -137,9 +137,9 @@ class AnalysisConfig:
         self.name = name
         self.paths = {
             'FSI':       FSI_path,
-            'SONATA':    os.path.join(FSI_path, 'SONATA'),
-            'PanelAero': os.path.join(FSI_path, 'PanelAero'),
-            'FEA':       os.path.join(FSI_path, 'FEA'),
+            'SONATA':    os.path.join(FSI_path, 'STRUCTURE', 'SONATA'),
+            'PanelAero': os.path.join(FSI_path, 'FLUID', 'PanelAero'),
+            'FEA':       os.path.join(FSI_path, 'STRUCTURE', 'FEA'),
         }
 
         # Apply global defaults first, then case-specific overrides
