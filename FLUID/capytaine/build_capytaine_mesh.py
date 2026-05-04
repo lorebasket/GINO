@@ -2,10 +2,14 @@
 Build a watertight quadrilateral surface mesh for the NACA0003 example geometry
 using Capytaine's Mesh API (vertices + faces).
 
-Coordinate convention (aligned with STRUCTURE/FEA beam model):
-    X : chordwise (elastic-axis reference at mid-chord by default)
-    Y : span [0, beam_length]
-    Z : thickness (airfoil normal-to-chord in section)
+Coordinate convention (STRUCTURE/FEA beam model / ``create_beam_model``):
+    X : chordwise; section shifted so ``xea_factor * chord`` lies at ``X = 0`` (elastic-axis line).
+    Y : span from ``0`` to ``beam_length`` (same as beam node ``y`` coordinates).
+    Z : airfoil thickness; mid-thickness / chord line at ``Z = 0`` for symmetric sections.
+
+By default the mesh is **not** shifted in ``Z``: beam nodes sit at ``z = 0``, matching ``offset_z``
+ignored here for geometry (legacy hydro pipelines used ``offset_z = -100`` only for wavemakers /
+numerics — use ``--use-config-offset-z`` if you still want that translation on the hull).
 
 See: https://capytaine.org/stable/user_manual/mesh.html
 
@@ -110,7 +114,7 @@ def build_naca0003_mesh(
     alpha_deg: float = 0.0,
     dihedral_deg: float = 0.0,
     offset: np.ndarray | None = None,
-    name: str = "NACA0003_hull",
+    name: str = "NACA0003_mesh",
 ):
     """
     Loft the closed airfoil polygon along span and close with root/tip caps.
@@ -246,6 +250,19 @@ def main():
     parser = argparse.ArgumentParser(description="Build Capytaine hull mesh for NACA0003 example.")
     parser.add_argument("--n-span", type=int, default=24, help="Spanwise segments")
     parser.add_argument(
+        "--offset-z",
+        type=float,
+        default=0.0,
+        metavar="DZ",
+        help="Extra translation applied to all mesh vertices along Z after build [m]. "
+        "Default 0 keeps the hull in the same frame as beam nodes (elastic axis at z=0).",
+    )
+    parser.add_argument(
+        "--use-config-offset-z",
+        action="store_true",
+        help="Ignore --offset-z and use AnalysisConfig.offset_z instead (e.g. -100 for legacy hydro spacing).",
+    )
+    parser.add_argument(
         "--out",
         type=str,
         default=os.path.join(_THIS_DIR, "NACA0003_hull.vtu"),
@@ -265,7 +282,17 @@ def main():
 
     cfg = get_config("NACA0003")
 
-    offset = np.array([0.0, 0.0, float(getattr(cfg, "offset_z", 0.0))], dtype=float)
+    if args.use_config_offset_z:
+        dz = float(getattr(cfg, "offset_z", 0.0))
+        print(f"Mesh Z translation from config offset_z = {dz:g} m (--use-config-offset-z)")
+    else:
+        dz = float(args.offset_z)
+        if dz != 0.0:
+            print(f"Mesh Z translation from --offset-z = {dz:g} m")
+        else:
+            print("Mesh aligned with beam frame: Z translation 0 (elastic-axis line at z=0).")
+
+    offset = np.array([0.0, 0.0, dz], dtype=float)
 
     mesh = build_naca0003_mesh(
         beam_length=float(cfg.beam_length),

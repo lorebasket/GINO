@@ -1,8 +1,8 @@
 # FSI/COUPLING/aero_structural_coupling.py
 
 import numpy as np
-from .hydroelastic_utl.coupling_matrix import main as spline_main
-from .hydroelastic_utl.coupling_matrix import build_Z_qs, build_Z_force
+from .hydroelastic_utl.aerogrid_coupling_matrix import main as spline_main
+from .hydroelastic_utl.aerogrid_coupling_matrix import build_Z_qs, build_Z_force
 from panelaero_utl.old import Apan_to_fem
 from FEA.fea_utl import cantilever_beam
 
@@ -32,7 +32,7 @@ def calculate_spline_matrix(beam_model, aerogrid, config):
     )
     
     # Calculate and print distances of control and force points from y-axis
-    from .hydroelastic_utl.coupling_matrix import calculate_control_force_points_distances
+    from .hydroelastic_utl.aerogrid_coupling_matrix import calculate_control_force_points_distances
     distance_results = calculate_control_force_points_distances(aerogrid, xea_factor=xea_factor)
     
     # Apply boundary conditions to the coupling matrix
@@ -115,7 +115,7 @@ def calculate_spline_matrix(beam_model, aerogrid, config):
     
     # Plot chordwise strip if requested
     if hasattr(config, 'plot_chordwise_strip') and config.plot_chordwise_strip:
-        from .hydroelastic_utl.coupling_matrix import plot_chordwise_strip
+        from .hydroelastic_utl.aerogrid_coupling_matrix import plot_chordwise_strip
         y_target = getattr(config, 'chordwise_strip_y', 3.0)
         plot_chordwise_strip(aerogrid, y_target=y_target, xea_factor=xea_factor, 
                             xcm_factor=getattr(config, 'xcm_factor', None), 
@@ -123,7 +123,7 @@ def calculate_spline_matrix(beam_model, aerogrid, config):
     
     # Plot full wing if requested
     if hasattr(config, 'plot_full_wing') and config.plot_full_wing:
-        from .hydroelastic_utl.coupling_matrix import plot_full_wing
+        from .hydroelastic_utl.aerogrid_coupling_matrix import plot_full_wing
         plot_full_wing(aerogrid, xea_factor=xea_factor, 
                       xcm_factor=getattr(config, 'xcm_factor', None), 
                       config=config)
