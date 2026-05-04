@@ -35,6 +35,7 @@ def _save_modal_data_to_csv(beam_model, total_dof, constrained_dofs, dry_values,
     None
     """
     import csv
+    import os
     
     print(f"\n*** Saving modal data to CSV files ***")
     

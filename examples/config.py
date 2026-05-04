@@ -24,9 +24,9 @@ sys.path.append(os.path.join(FSI_path, 'STRUCTURE', 'SONATA', '6_AGARD445.6', 'c
 GLOBAL_FLAGS = {
 
     # ── Beam model ────────────────────────────────────────────────────────────
-    'n_elements':                       400,
-    'nspan':                            20,
-    'nchord':                           10,
+    'n_elements':                       200,
+    'nspan':                            30,
+    'nchord':                           15,
 
     # ── Modal analysis ────────────────────────────────────────────────────────
     'num_modes_egv':                    5, # number of computed modes dry analysis
@@ -41,7 +41,7 @@ GLOBAL_FLAGS = {
     'output_dir':                       os.path.join(FSI_path, 'output_data'),
     'save_global_matrices':             False,
     'save_matrices':                    False,
-    'save_modal_data':                  False,
+    'save_modal_data':                  True,
 
     # ── Visualization ─────────────────────────────────────────────────────────
     'plot_mode_shapes':                 True,
