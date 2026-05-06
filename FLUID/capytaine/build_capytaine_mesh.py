@@ -44,6 +44,44 @@ def _rotation_y(angle_deg: float) -> np.ndarray:
     return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=float)
 
 
+def _resample_closed_contour(raw_coords: np.ndarray, n_points: int) -> np.ndarray:
+    """
+    Uniformly resample a closed 2D contour by arc length.
+
+    Parameters
+    ----------
+    raw_coords : (N, 2) array
+        Input section coordinates. The contour can be open (first != last) or
+        explicitly closed (first == last).
+    n_points : int
+        Number of perimeter points to generate (without repeating the first point at end).
+    """
+    if n_points < 3:
+        raise ValueError(f"n_points must be >= 3, got {n_points}.")
+
+    p = np.asarray(raw_coords, dtype=float)
+    if p.ndim != 2 or p.shape[1] != 2:
+        raise ValueError("raw_coords must have shape (N, 2)")
+    if p.shape[0] < 3:
+        raise ValueError("Need at least 3 input contour points.")
+
+    # Ensure explicit closure once, then parameterize by cumulative arc length.
+    if not np.allclose(p[0], p[-1]):
+        p = np.vstack([p, p[0]])
+
+    seg = np.linalg.norm(p[1:] - p[:-1], axis=1)
+    if not np.all(np.isfinite(seg)):
+        raise ValueError("Non-finite segment length in contour coordinates.")
+    if float(np.sum(seg)) <= 0.0:
+        raise ValueError("Degenerate contour: total perimeter length is zero.")
+
+    s = np.concatenate([[0.0], np.cumsum(seg)])
+    s_target = np.linspace(0.0, s[-1], int(n_points), endpoint=False)
+    x = np.interp(s_target, s, p[:, 0])
+    z = np.interp(s_target, s, p[:, 1])
+    return np.column_stack([x, z])
+
+
 def _symmetric_section_cap_faces(base: int, ile: int, n_per: int, *, tip: bool) -> list[list[int]]:
     """
     Cap mesh using symmetry about the chord line: pair ``ile-k`` with ``ile+k`` (mirror
@@ -111,11 +149,11 @@ def build_naca0003_mesh(
     raw_coords: np.ndarray,
     xea_factor: float = 0.5,
     n_span: int = 24,
+    n_chord: int | None = None,
     alpha_deg: float = 0.0,
     dihedral_deg: float = 0.0,
     offset: np.ndarray | None = None,
-    name: str = "NACA0003_mesh",
-):
+    name: str = "NACA0003_mesh"):
     """
     Loft the closed airfoil polygon along span and close with root/tip caps.
 
@@ -133,7 +171,93 @@ def build_naca0003_mesh(
     if raw_coords.ndim != 2 or raw_coords.shape[1] != 2:
         raise ValueError("raw_coords must have shape (N, 2)")
 
-    perimeter = raw_coords[:-1].copy()
+    if n_chord is not None:
+        perimeter = _resample_closed_contour(raw_coords, int(n_chord))
+    else:
+        perimeter = raw_coords[:-1].copy()
+    n_per = perimeter.shape[0]
+    if n_per < 3:
+        raise ValueError("Need at least 3 perimeter points")
+
+    xea = float(xea_factor) * chord
+
+    y_sta = np.linspace(0.0, beam_length, n_span + 1)
+    verts_list = []
+    for y in y_sta:
+        x_phys = (perimeter[:, 0] * chord) - xea
+        z_phys = perimeter[:, 1] * chord
+        sec = np.column_stack([x_phys, np.full(n_per, y), z_phys])
+        verts_list.append(sec)
+    vertices = np.vstack(verts_list)
+
+    # Optional dihedral (rotation about span axis Y), then angle of attack like rotate_beam_model_y
+    R_tot = _rotation_y(alpha_deg) @ _rotation_y(dihedral_deg)
+    vertices = np.einsum("ij,nj->ni", R_tot, vertices)
+
+    if offset is not None:
+        vertices = vertices + np.asarray(offset, dtype=float).reshape(1, 3)
+
+    faces = []
+
+    # Lateral surface (quads along perimeter × span)
+    for i in range(n_span):
+        for j in range(n_per):
+            jn = (j + 1) % n_per
+            i00 = i * n_per + j
+            i01 = i * n_per + jn
+            i10 = (i + 1) * n_per + j
+            i11 = (i + 1) * n_per + jn
+            faces.append([i00, i01, i11, i10])
+
+    ile = int(np.argmin(perimeter[:, 0]))
+
+    # Root / tip caps: symmetric strips (pair ile-k with ile+k), not LE triangle fan.
+    faces.extend(_symmetric_section_cap_faces(0, ile, n_per, tip=False))
+    tip0 = n_span * n_per
+    faces.extend(_symmetric_section_cap_faces(tip0, ile, n_per, tip=True))
+
+    faces_arr = np.asarray(faces, dtype=np.int64)
+    mesh = cpt.Mesh(vertices=vertices, faces=faces_arr, name=name)
+
+    # Do not call heal_normals here: compute_connectivity assumes a conformal
+    # manifold; foil meshes often have TE-like topology where an edge is shared
+    # by more than two panels, which raises RuntimeError.
+    return mesh
+
+
+def build_ABRAMSON1965_mesh(
+    *,
+    beam_length: float,
+    chord: float,
+    raw_coords: np.ndarray,
+    xea_factor: float = 0.5,
+    n_span: int = 24,
+    n_chord: int | None = None,
+    alpha_deg: float = 0.0,
+    dihedral_deg: float = 0.0,
+    offset: np.ndarray | None = None,
+    name: str = "ABRAMSON1965_mesh"):
+    """
+    Loft the closed airfoil polygon along span and close with root/tip caps.
+
+    Parameters
+    ----------
+    raw_coords : (N, 2) array
+        Section polygon in chord-normalized coordinates (x/c, y/c), first and
+        last row typically duplicate the trailing edge (closed loop).
+    n_span : int
+        Number of spanwise segments (stations = n_span + 1).
+    """
+    import capytaine as cpt
+
+    raw_coords = np.asarray(raw_coords, dtype=float)
+    if raw_coords.ndim != 2 or raw_coords.shape[1] != 2:
+        raise ValueError("raw_coords must have shape (N, 2)")
+
+    if n_chord is not None:
+        perimeter = _resample_closed_contour(raw_coords, int(n_chord))
+    else:
+        perimeter = raw_coords[:-1].copy()
     n_per = perimeter.shape[0]
     if n_per < 3:
         raise ValueError("Need at least 3 perimeter points")
@@ -247,8 +371,20 @@ def _preview_mesh(mesh, use_vtk: bool) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build Capytaine hull mesh for NACA0003 example.")
-    parser.add_argument("--n-span", type=int, default=24, help="Spanwise segments")
+    parser = argparse.ArgumentParser(description="Build Capytaine mesh for a given hydrofoil example.")
+    parser.add_argument("--case_name", type=str, default="NACA0003", help="Example to build mesh for")
+    parser.add_argument(
+        "--n-span",
+        type=int,
+        default=None,
+        help="Spanwise segments (override; default comes from cfg.mesh_n_span or 24).",
+    )
+    parser.add_argument(
+        "--n-chord",
+        type=int,
+        default=None,
+        help="Perimeter points on interpolated contour (override; default comes from cfg.mesh_n_chord).",
+    )
     parser.add_argument(
         "--offset-z",
         type=float,
@@ -265,7 +401,7 @@ def main():
     parser.add_argument(
         "--out",
         type=str,
-        default=os.path.join(_THIS_DIR, "NACA0003_hull.vtu"),
+        default=None,
         help="Output path (.vtu / .stl / .npz)",
     )
     parser.add_argument(
@@ -279,8 +415,14 @@ def main():
         help="Matplotlib 3D preview (blocks until figure closed)",
     )
     args = parser.parse_args()
+    if args.out is None:
+        args.out = os.path.join(_THIS_DIR, f"{args.case_name}/{args.case_name}_mesh.vtu")
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
-    cfg = get_config("NACA0003")
+    cfg = get_config(args.case_name)
+    n_span = int(args.n_span) if args.n_span is not None else int(getattr(cfg, "mesh_n_span", 24))
+    n_chord = int(args.n_chord) if args.n_chord is not None else getattr(cfg, "mesh_n_chord", None)
+    n_chord = int(n_chord) if n_chord is not None else None
 
     if args.use_config_offset_z:
         dz = float(getattr(cfg, "offset_z", 0.0))
@@ -294,23 +436,41 @@ def main():
 
     offset = np.array([0.0, 0.0, dz], dtype=float)
 
-    mesh = build_naca0003_mesh(
-        beam_length=float(cfg.beam_length),
-        chord=float(cfg.chord),
-        raw_coords=cfg.raw,
-        xea_factor=float(cfg.xea_factor),
-        n_span=args.n_span,
-        alpha_deg=float(getattr(cfg, "alpha_deg", 0.0)),
-        dihedral_deg=float(getattr(cfg, "dihedral_angle", 0.0)),
-        offset=offset,
-        name="NACA0003",
-    )
+    if args.case_name == "NACA0003":
+        mesh = build_naca0003_mesh(
+            beam_length=float(cfg.beam_length),
+            chord=float(cfg.chord),
+            raw_coords=cfg.raw,
+            xea_factor=float(cfg.xea_factor),
+            n_span=n_span,
+            n_chord=n_chord,
+            alpha_deg=float(getattr(cfg, "alpha_deg", 0.0)),
+            dihedral_deg=float(getattr(cfg, "dihedral_angle", 0.0)),
+            offset=offset,
+            name="NACA0003",
+        )
+
+    elif args.case_name == "ABRAMSON1965":
+        mesh = build_ABRAMSON1965_mesh(
+            beam_length=float(cfg.beam_length),
+            chord=float(cfg.chord),
+            raw_coords=cfg.raw,
+            xea_factor=float(cfg.xea_factor),
+            n_span=n_span,
+            n_chord=n_chord,
+            alpha_deg=float(getattr(cfg, "alpha_deg", 0.0)),
+            dihedral_deg=float(getattr(cfg, "dihedral_angle", 0.0)),
+            offset=offset,
+            name="ABRAMSON1965",
+        )
+    else:
+        raise ValueError(f"Mesher not implemented for case: {args.case_name}")
 
     body = None
     try:
         import capytaine as cpt
 
-        body = cpt.FloatingBody(mesh=mesh, name="NACA0003")
+        body = cpt.FloatingBody(mesh=mesh, name=args.case_name)
         print(f"FloatingBody: {body}")
     except Exception as e:
         print(f"FloatingBody construction note: {e}")

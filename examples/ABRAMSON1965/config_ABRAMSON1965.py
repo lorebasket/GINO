@@ -13,7 +13,7 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
     vjj_dir = os.path.join(QJJ_path, f"vjj_ABRAMSON1965_{fluid}_alpha{attack_angle_deg}_nspan{nspan}_nchord{nchord}_quartic")
     aerogrid_path = os.path.join(qjj_dir, "aerogrid.npz")
 
-    V_low     = np.linspace(2,  10,  8)
+    V_low     = np.linspace(5,  10,  5)
     V_flutter = np.linspace(10, 18, 30)
     V_high    = np.linspace(18, 20,  5)
 
@@ -51,6 +51,13 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         GAx=1.0e8,
         GAz=1.0e8,
 
+        # ── Rayleigh damping ──────────────────────────────────────────────
+        rayleigh_target_zetas=(-0.01, -0.01),
+
+        # ── Analysis struct params ────────────────────────────────────────
+        modal_dir = os.path.join(FSI_path, "output_data", "ABRAMSON1965"),
+        prefix = "ABRAMSON1965_dry_egv",
+
         # ── Flutter sweep ─────────────────────────────────────────────────
         alpha_deg=attack_angle_deg,
         alpha_r=np.deg2rad(attack_angle_deg),
@@ -65,19 +72,56 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         n_lag=1,
         blag=np.linspace(4, 10, 1),
 
-        # ── Rayleigh damping ──────────────────────────────────────────────
-        rayleigh_target_zetas=(-0.01, -0.01),
-
-        # ── Post-processing ───────────────────────────────────────────────
-        save_matrices=True,
-        plot_mode_shapes=True,
-        classify_modes=True,
-        selective_dofs=None,
-
+        # ── Capytaine sweep ──────────────────────────────────────────────
+        mesh_path = os.path.join(FSI_path, "FLUID", "capytaine", "ABRAMSON1965", "ABRAMSON1965_mesh.vtu"),
+        mesh_n_span = 30,
+        mesh_n_chord = 30,
+        omega_list = np.linspace(1.0, 120, 60),
+        free_surface_elevation = 0.0,
+        water_depth = 1.0,
+        depth = np.linspace(0.01, 0.5, 30),
+        
         # ── Aerodynamic grid ──────────────────────────────────────────────
         nspan=nspan,
         nchord=nchord,
         qjj_dir=qjj_dir,
         vjj_dir=vjj_dir,
         aerogrid_path=aerogrid_path,
+
+        # ── Section coordinates (normalized by chord length) ──────────────
+        raw=np.array([
+            [1.0000,     0.00120],
+            [0.9500,     0.01415],
+            [0.9000,     0.02517],
+            [0.8000,     0.04199],
+            [0.7000,     0.05269],
+            [0.6000,     0.05835],
+            [0.5000,     0.06000],
+            [0.4000,     0.05855],
+            [0.3000,     0.05417],
+            [0.2000,     0.04664],
+            [0.1500,     0.04135],
+            [0.1000,     0.03457],
+            [0.0750,     0.03032],
+            [0.0500,     0.02509],
+            [0.0250,     0.01805],
+            [0.0125,     0.01292],
+            [0.0000,     0.00000],
+            [0.0125,     -0.01292],
+            [0.0250,     -0.01805],
+            [0.0500,     -0.02509],
+            [0.0750,     -0.03032],
+            [0.1000,     -0.03457],
+            [0.1500,     -0.04135],
+            [0.2000,     -0.04664],
+            [0.3000,     -0.05417],
+            [0.4000,     -0.05855],
+            [0.5000,     -0.06000],
+            [0.6000,     -0.05835],
+            [0.7000,     -0.05269],
+            [0.8000,     -0.04199],
+            [0.9000,     -0.02517],
+            [0.9500,     -0.01415],
+            [1.0000,     -0.00120]
+        ]),
     )

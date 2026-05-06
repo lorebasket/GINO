@@ -197,7 +197,7 @@ def _extract_flutter_modes(A_aug, Nm, omega_n, return_eigenvectors=False,
     # Choose modes: MAC-based (if previous available) or frequency-based
     if vecs_previous is not None and freqs_previous is not None and len(eigs_filt) >= Nm:
         # MAC-based selection: search among 2*Nm candidates
-        from panelaero_utl.pk_method_utl import roger_mode_tracking
+        from COUPLING.hydroelastic_utl import roger_mode_tracking
         
         n_candidates = min(len(eigs_filt), 2 * Nm)
         indices_best = roger_mode_tracking._select_modes_by_mac(
@@ -379,6 +379,10 @@ def _solve_roger_fit_method(config, V_list, structural_results, coupling_results
             if i_k % max(1, Nk // 3) == 0:
                 print(f"    k={k:.4f}: fit error = {err:.2e}")
         print(f"  STEP C: Max fit error = {max_err:.2e} (target < 1%)")
+
+        ## STEP C.5: capytaine BEM modal analysis
+        #if config.capytaine_BEM_modal_analysis:
+        #    M_added
 
         # STEP D: Augmented state matrix
         A_aug = _build_A_aug(

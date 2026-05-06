@@ -24,13 +24,13 @@ sys.path.append(os.path.join(FSI_path, 'STRUCTURE', 'SONATA', '6_AGARD445.6', 'c
 GLOBAL_FLAGS = {
 
     # ── Beam model ────────────────────────────────────────────────────────────
-    'n_elements':                       200,
-    'nspan':                            30,
-    'nchord':                           15,
+    'n_elements':                       300,
+    'nspan':                            22,
+    'nchord':                           11,
 
     # ── Modal analysis ────────────────────────────────────────────────────────
-    'num_modes_egv':                    5, # number of computed modes dry analysis
-    'num_modes_flutter_egv':            4,  # number of modes used in flutter analysis
+    'num_modes_egv':                    2, # number of computed modes dry analysis
+    'num_modes_flutter_egv':            2,  # number of modes used in flutter analysis
 
     # ── Fluid properties ──────────────────────────────────────────────────────
     'c_sound':  {'air': 332.5, 'water': 1484.0},   # [m/s]  at ~2000 m
@@ -71,12 +71,12 @@ GLOBAL_FLAGS = {
     'modal_capytaine_dofs':             False,
 
     # ── FLUTTER analysis method ───────────────────────────────────────────────
-    'pk_method':                        True,   # P-K method aeroelastic analysis
-    'roger_fit':                        False,  # Roger RFA hydroelastic analysis
+    'pk_method':                        False,   # P-K method aeroelastic analysis
+    'roger_fit':                        True,  # Roger RFA hydroelastic analysis
 
     # ── P-K method — flags ────────────────────────────────────────────────────
-    'mac_matching':                     False,
-    'last_converged_mode_matching':     False,
+    'mac_matching':                     True,
+    'last_converged_mode_matching':     True,
     'k_guess':                          0.001,
 
     # ── Roger RFA ─────────────────────────────────────────────────────────────
@@ -103,16 +103,9 @@ GLOBAL_FLAGS = {
     'rayleigh_mode_ids':                (0, 1),
     'rayleigh_target_zetas':            (0.0, 0.0),
 
-    # ── Added mass ────────────────────────────────────────────────────────────
-    # False = aeroelastic analysis, True = hydroelastic analysis
+    # ── Circulatory components ──────────────────────────────────────────────────
     'added_mass_strip_theory':          False,
-
-    # ── Hybrid non-circulatory operator ──────────────────────────────────────
-    'hybrid_nc_operator':               False,
-    'capytaine_data_dir':               os.path.join(FSI_path, 'aeroelastic_coupling', 'hydrodynamics', 'capytaine_matrices'),
-    'capytaine_multibody':              False,
-    'capytaine_singlebody':             False,
-    'free_surface_elevation':           0.0,
+    'capytaine_BEM_modal_analysis':     True,
 
     # ── Velocity sweep (fallback — most cases override this) ─────────────────
     'V_list': np.concatenate([

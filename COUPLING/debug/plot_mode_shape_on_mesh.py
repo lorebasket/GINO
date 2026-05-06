@@ -24,9 +24,7 @@ Example::
 
     cd FSI
     python COUPLING/debug/plot_mode_shape_on_mesh.py \\
-      --mesh FLUID/capytaine/NACA0003_mesh.vtu \\
-      --modal-dir output_data/NACA0003 \\
-      --prefix NACA0003_dry_egv \\
+      --case-name NACA0003 \\
       --scale 0.5 \\
       --mesh-translate 0 0 100 \\
       --save COUPLING/debug/NACA0003_mode1_mesh.png
@@ -211,6 +209,23 @@ def _configure_matplotlib_backend(*, save_path: str | None, show: bool, mpl_back
         )
 
 
+def _resolve_case_defaults(
+    case_name: str,
+    mesh_path: str | None,
+    modal_dir: str | None,
+    prefix: str | None,
+) -> tuple[str, str, str]:
+    """Build default paths from case name, while allowing manual overrides."""
+    default_mesh = os.path.join(_FSI_ROOT, "FLUID", "capytaine", f"{case_name}", f"{case_name}_mesh.vtu")
+    default_modal_dir = os.path.join(_FSI_ROOT, "output_data", f"{case_name}")
+    default_prefix = f"{case_name}_dry_egv"
+    return (
+        mesh_path if mesh_path else default_mesh,
+        modal_dir if modal_dir else default_modal_dir,
+        prefix if prefix else default_prefix,
+    )
+
+
 def plot_mesh_mode(
     mesh_path: str,
     modal_dir: str,
@@ -222,8 +237,7 @@ def plot_mesh_mode(
     show: bool,
     mesh_translate: np.ndarray | None = None,
     mpl_backend: str | None = None,
-    normalize_phi: bool = True,
-):
+    normalize_phi: bool = True):
     _configure_matplotlib_backend(save_path=save_path, show=show, mpl_backend=mpl_backend)
 
     import matplotlib.pyplot as plt
@@ -351,10 +365,11 @@ Examples:
   # Save PNG, then open interactive window
   python plot_mode_shape_on_mesh.py --mesh-translate 0 0 100 --save out.png -i
 
+  # Run from case name only (mesh/modal/prefix auto-derived)
+  python plot_mode_shape_on_mesh.py --case-name NACA0003
+
   python plot_mode_shape_on_mesh.py \\
-    --mesh ../FLUID/capytaine/NACA0003_mesh.vtu \\
-    --modal-dir ../../output_data/NACA0003 \\
-    --prefix NACA0003_dry_egv --scale 0.5 \\
+    --case-name NACA0003 --scale 0.5 \\
     --mesh-translate 0 0 100 \\
     --save NACA0003_mode_mesh.png
 """
@@ -364,19 +379,24 @@ Examples:
         epilog=_epilog,
     )
     ap.add_argument(
+        "--case_name",
+        default="NACA0003",
+        help="Case identifier used to derive defaults for mesh/modal files.",
+    )
+    ap.add_argument(
         "--mesh",
-        default=os.path.join(_FSI_ROOT, "FLUID", "capytaine", "NACA0003_mesh.vtu"),
-        help="Path to mesh file (vtu, vtk, …)",
+        default=None,
+        help="Path to mesh file (vtu, vtk, …). Default: FLUID/capytaine/<case_name>_mesh.vtu",
     )
     ap.add_argument(
         "--modal-dir",
-        default=os.path.join(_FSI_ROOT, "output_data", "NACA0003"),
-        help="Directory containing *_dry_egv_*.csv",
+        default=None,
+        help="Directory containing *_dry_egv_*.csv. Default: output_data/<case_name>",
     )
     ap.add_argument(
         "--prefix",
-        default="NACA0003_dry_egv",
-        help="CSV filename prefix (before _nodes.csv, _eigendata.csv, …)",
+        default=None,
+        help="CSV filename prefix. Default: <case_name>_dry_egv",
     )
     ap.add_argument("--mode", type=int, default=0, help="0-based mode index (0 = first mode)")
     ap.add_argument("--scale", type=float, default=0.5, help="Visual amplification factor")
@@ -414,15 +434,22 @@ Examples:
         help="Translate mesh vertices before deformation [m] if VTU frame ≠ beam CSV (legacy offset meshes).",
     )
     args = ap.parse_args()
+    mesh_path, modal_dir, prefix = _resolve_case_defaults(
+        case_name=args.case_name,
+        mesh_path=args.mesh,
+        modal_dir=args.modal_dir,
+        prefix=args.prefix,
+    )
 
-    save_path = args.save if args.save else None
+    save_path = args.save if args.save else f"{args.case_name}/{args.case_name}_mesh_coupling.png"
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     # Interactive when explicitly requested, or when not saving only to file (no --save).
     show_plot = bool(args.show_plot) or (save_path is None)
 
     plot_mesh_mode(
-        mesh_path=args.mesh,
-        modal_dir=args.modal_dir,
-        prefix=args.prefix,
+        mesh_path=mesh_path,
+        modal_dir=modal_dir,
+        prefix=prefix,
         mode_index=args.mode,
         scale=args.scale,
         span_axis=args.span_axis,
