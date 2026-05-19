@@ -4,6 +4,8 @@
 
 This module builds the aero/hydro-dynamic panel grid and precomputes the **Qjj matrices** (generalised aero/hydro-dynamic force matrices) using the **Doublet Lattice Method (DLM)** or the **Vortex Lattice Method (VLM)**. These matrices are stored on disk and loaded at runtime by `main.py` during the flutter analysis.
 
+For water cases that use the Capytaine Boundary Element Method (BEM) correction, PanelAero still provides the circulatory DLM/VLM contribution while `FLUID/capytaine/` provides the non-circulatory added-mass and radiation-damping matrices. See [`../capytaine/README.md`](../capytaine/README.md) for that workflow.
+
 ---
 
 ## Folder Structure
@@ -142,3 +144,4 @@ precompute_qjj_grid(..., resume=True, verify_existing=True, ...)
 - The `qjj_precomputed/` output folder is **not uploaded** to the repository (excluded via `.gitignore`) due to its large size. It must be recomputed locally.
 - The DLM implementation follows Rodden's formulation. The `quartic` method (Rodden 1998) is recommended for production runs; `parabolic` (Rodden 1971/72) is faster but less accurate at high reduced frequencies.
 - CAERO1 card files generated during aerogrid construction are saved in `panelaero_utl/CAERO1_cards/`.
+- Capytaine BEM validation is under development; the current Abramson comparison is documented in [`../../docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf`](../../docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf).

@@ -1,17 +1,25 @@
 """
-Build a watertight quadrilateral surface mesh for the NACA0003 example geometry
-using Capytaine's Mesh API (vertices + faces).
+Build a watertight surface mesh for hydrofoil examples (e.g. NACA0003, ABRAMSON1965)
+using **Gmsh** to extrude the closed section from ``config.raw`` along the beam span,
+then load the hull into Capytaine.
 
 Coordinate convention (STRUCTURE/FEA beam model / ``create_beam_model``):
     X : chordwise; section shifted so ``xea_factor * chord`` lies at ``X = 0`` (elastic-axis line).
     Y : span from ``0`` to ``beam_length`` (same as beam node ``y`` coordinates).
     Z : airfoil thickness; mid-thickness / chord line at ``Z = 0`` for symmetric sections.
 
+    After meshing, vertices are rotated: dihedral and angle of attack about **+Y** (same as
+    ``rotate_beam_model_y``), then optional **structural pitch** about **+X** via
+    ``config.pitch`` (deg), matching ``post_pitch_utils`` / ``rotate_beams_x``.
+
 By default the mesh is **not** shifted in ``Z``: beam nodes sit at ``z = 0``, matching ``offset_z``
 ignored here for geometry (legacy hydro pipelines used ``offset_z = -100`` only for wavemakers /
 numerics — use ``--use-config-offset-z`` if you still want that translation on the hull).
 
 See: https://capytaine.org/stable/user_manual/mesh.html
+
+Requires the Gmsh Python API (``pip install gmsh`` / system package) and **meshio** for
+reading the generated ``.msh`` into Capytaine (same as Capytaine's MSH v4 path).
 
 Usage (from FSI root with sonata-env active):
     python FLUID/capytaine/build_capytaine_mesh.py
@@ -25,6 +33,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 
 import numpy as np
 
@@ -42,6 +51,16 @@ def _rotation_y(angle_deg: float) -> np.ndarray:
     t = np.deg2rad(angle_deg)
     c, s = np.cos(t), np.sin(t)
     return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=float)
+
+
+def _rotation_x(angle_deg: float) -> np.ndarray:
+    """Right-handed rotation about +X (structural pitch), consistent with ``rotate_beams_x``."""
+    t = np.deg2rad(float(angle_deg))
+    c, s = np.cos(t), np.sin(t)
+    return np.array(
+        [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]],
+        dtype=float,
+    )
 
 
 def _resample_closed_contour(raw_coords: np.ndarray, n_points: int) -> np.ndarray:
@@ -82,64 +101,167 @@ def _resample_closed_contour(raw_coords: np.ndarray, n_points: int) -> np.ndarra
     return np.column_stack([x, z])
 
 
-def _symmetric_section_cap_faces(base: int, ile: int, n_per: int, *, tip: bool) -> list[list[int]]:
-    """
-    Cap mesh using symmetry about the chord line: pair ``ile-k`` with ``ile+k`` (mirror
-    stations about the LE) into quad strips instead of fanning from LE.
+def _default_gmsh_lc(
+    perimeter: np.ndarray,
+    chord: float,
+    beam_length: float,
+    n_span: int,
+    n_chord: int | None,
+) -> float:
+    """Gmsh characteristic length from perimeter length, ``n_chord`` / ``n_span`` targets."""
+    x = perimeter[:, 0] * float(chord)
+    z = perimeter[:, 1] * float(chord)
+    p2 = np.column_stack([x, z])
+    if not np.allclose(p2[0], p2[-1]):
+        p2 = np.vstack([p2, p2[0]])
+    seg = np.linalg.norm(p2[1:] - p2[:-1], axis=1)
+    perim_len = float(np.sum(seg))
+    nper = int(perimeter.shape[0])
+    nch = int(n_chord) if n_chord is not None else max(nper, 8)
+    lc_arc = perim_len / max(2 * nch, 6)
+    lc_span = float(beam_length) / max(2 * int(n_span), 4)
+    return float(max(min(lc_arc, lc_span), 1e-10))
 
-    Perimeter ordering: TE → upper → LE → lower → … → near TE, LE at ``argmin(x)``.
 
-    Let ``nu = ile`` (vertices on upper strictly before LE) and
-    ``nl = n_per - 1 - ile`` (vertices on lower strictly after LE).
+def _meshio_surface_only(msh_path: str):
+    """Read a Gmsh ``.msh`` and keep only triangle/quad hull cells (drop volume elements)."""
+    import meshio
 
-    * If ``nu == nl`` (odd ``n_per``): strips alone close the TE at vertex ``0``.
-    * If ``|nu - nl| == 1`` (even ``n_per``): one extra vertex on one TE branch; add a final
-      quadrilateral ``1 — 0 — (n_per-1) — (n_per-2)`` (indices relative to cap ring).
-
-    Larger imbalances are rejected (would need more than one TE patch).
-    Capytaine triangles close with first vertex repeated (``[a,b,c,a]``).
-    """
-    nu = ile
-    nl = n_per - 1 - ile
-    if nu < 1 or nl < 1:
-        raise ValueError(f"Invalid LE split: ile={ile}, n_per={n_per} (need nu>=1 and nl>=1).")
-    imbalance = nu - nl
-    if abs(imbalance) > 1:
-        raise ValueError(
-            "Symmetric TE caps support at most one extra vertex on upper or lower TE branch "
-            f"(|nu-nl|<=1). Got nu={nu}, nl={nl}, n_per={n_per}, ile={ile}."
+    m = meshio.read(msh_path)
+    surf = [cb for cb in m.cells if cb.type in ("triangle", "quad")]
+    if not surf:
+        raise RuntimeError(
+            f"No triangle/quad cells in {msh_path!r}. "
+            "Gmsh may not have meshed the hull; try a smaller --gmsh-lc."
         )
+    return meshio.Mesh(points=m.points, cells=surf)
 
-    def iv(j: int) -> int:
-        return base + j
 
-    faces: list[list[int]] = []
+def build_extruded_airfoil_mesh_gmsh(
+    *,
+    beam_length: float,
+    chord: float,
+    raw_coords: np.ndarray,
+    xea_factor: float = 0.5,
+    n_span: int = 24,
+    n_chord: int | None = None,
+    alpha_deg: float = 0.0,
+    dihedral_deg: float = 0.0,
+    pitch_deg: float = 0.0,
+    offset: np.ndarray | None = None,
+    gmsh_lc: float | None = None,
+    name: str = "hydrofoil_mesh",
+):
+    """
+    Extrude the closed section (from ``raw_coords`` / ``cfg.raw``) along ``+Y`` with Gmsh,
+    mesh the hull, and build a Capytaine surface ``Mesh``.
 
-    # Leading-edge wedge between first mirrored neighbours of LE.
-    if tip:
-        faces.append([iv(ile), iv(ile - 1), iv(ile + 1), iv(ile)])
+    Same physical frame as the previous hand-built loft: section in the ``X``–``Z`` plane at
+    ``Y = 0``, scaled by ``chord`` and shifted by ``xea_factor * chord`` along ``X``, then
+    dihedral / angle of attack about ``+Y`` and structural pitch about ``+X``.
+
+    Parameters
+    ----------
+    raw_coords : (N, 2) array
+        Section polygon in chord-normalized coordinates (x/c, z/c), first and last row
+        typically duplicate the trailing edge (closed loop).
+    n_span : int
+        Number of spanwise segments (``n_span + 1`` stations along ``Y``).
+    pitch_deg : float
+        Structural pitch about **+X** [deg], same convention as ``AnalysisConfig.pitch`` and
+        ``rotate_beams_x``. Applied **after** Gmsh builds the mesh in the beam frame, together
+        with ``alpha_deg`` and ``dihedral_deg`` (compound rotation ``R_x @ R_y(α) @ R_y(Γ)``).
+    gmsh_lc : float, optional
+        Gmsh mesh size at section control points. If omitted, a default is derived from
+        ``n_chord`` / ``n_span`` and the scaled perimeter length.
+    """
+    try:
+        import gmsh
+    except ImportError as e:
+        raise ImportError(
+            "The Gmsh Python API is required for build_extruded_airfoil_mesh_gmsh. "
+            "Install with: pip install gmsh   (or use your system gmsh + Python bindings)."
+        ) from e
+
+    import capytaine as cpt
+    import meshio
+
+    raw_coords = np.asarray(raw_coords, dtype=float)
+    if raw_coords.ndim != 2 or raw_coords.shape[1] != 2:
+        raise ValueError("raw_coords must have shape (N, 2)")
+
+    if n_chord is not None:
+        perimeter = _resample_closed_contour(raw_coords, int(n_chord))
     else:
-        faces.append([iv(ile), iv(ile + 1), iv(ile - 1), iv(ile)])
+        perimeter = raw_coords[:-1].copy()
+    n_per = int(perimeter.shape[0])
+    if n_per < 3:
+        raise ValueError("Need at least 3 perimeter points")
 
-    # Quad strips while both sides have symmetric stations (same k on upper and lower).
-    n_pair = min(nu, nl)
-    for k in range(2, n_pair + 1):
-        um, up = iv(ile - k), iv(ile - (k - 1))
-        lm, lp = iv(ile + k), iv(ile + (k - 1))
-        if tip:
-            faces.append([up, um, lm, lp])
-        else:
-            faces.append([up, lp, lm, um])
+    xea = float(xea_factor) * float(chord)
+    lc = float(gmsh_lc) if gmsh_lc is not None else _default_gmsh_lc(
+        perimeter, chord, beam_length, n_span, n_chord
+    )
 
-    # Single TE quadrilateral when lower and upper branch counts differ by one.
-    if nu != nl:
-        up, lp, lm, um = iv(1), iv(n_per - 2), iv(n_per - 1), iv(0)
-        if tip:
-            faces.append([up, um, lm, lp])
-        else:
-            faces.append([up, lp, lm, um])
+    x_phys = perimeter[:, 0] * float(chord) - xea
+    z_phys = perimeter[:, 1] * float(chord)
 
-    return faces
+    fd, msh_path = tempfile.mkstemp(suffix=".msh", prefix="capytaine_gmsh_")
+    os.close(fd)
+    try:
+        gmsh.initialize()
+        try:
+            gmsh.option.setNumber("General.Terminal", 0)
+            gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+            gmsh.model.add("extruded_section")
+
+            point_tags: list[int] = []
+            for xi, zi in zip(x_phys, z_phys):
+                point_tags.append(gmsh.model.geo.addPoint(float(xi), 0.0, float(zi), lc))
+
+            n = len(point_tags)
+            line_tags: list[int] = []
+            for i in range(n):
+                j = (i + 1) % n
+                line_tags.append(gmsh.model.geo.addLine(point_tags[i], point_tags[j]))
+            loop = gmsh.model.geo.addCurveLoop(line_tags)
+            surf = gmsh.model.geo.addPlaneSurface([loop])
+            gmsh.model.geo.synchronize()
+
+            gmsh.model.geo.extrude(
+                [(2, surf)],
+                0.0,
+                float(beam_length),
+                0.0,
+                numElements=[int(n_span)],
+                recombine=False,
+            )
+            gmsh.model.geo.synchronize()
+
+            gmsh.model.mesh.generate(2)
+            gmsh.write(msh_path)
+        finally:
+            gmsh.finalize()
+
+        mio = _meshio_surface_only(msh_path)
+        meshio.write(msh_path, mio)
+        mesh = cpt.load_mesh(msh_path)
+
+        v = np.asarray(mesh.vertices, dtype=float)
+        # Structural rotations (same as legacy hand-loft): pitch about +X, then α and Γ about +Y.
+        R_tot = _rotation_x(pitch_deg) @ _rotation_y(alpha_deg) @ _rotation_y(dihedral_deg)
+        v = np.einsum("ij,nj->ni", R_tot, v)
+        if offset is not None:
+            v = v + np.asarray(offset, dtype=float).reshape(1, 3)
+        faces = np.asarray(mesh.faces, dtype=np.int64)
+        mesh = cpt.Mesh(vertices=v, faces=faces, name=name)
+    finally:
+        try:
+            os.remove(msh_path)
+        except OSError:
+            pass
+
+    return mesh
 
 
 def build_naca0003_mesh(
@@ -152,77 +274,26 @@ def build_naca0003_mesh(
     n_chord: int | None = None,
     alpha_deg: float = 0.0,
     dihedral_deg: float = 0.0,
+    pitch_deg: float = 0.0,
     offset: np.ndarray | None = None,
-    name: str = "NACA0003_mesh"):
-    """
-    Loft the closed airfoil polygon along span and close with root/tip caps.
-
-    Parameters
-    ----------
-    raw_coords : (N, 2) array
-        Section polygon in chord-normalized coordinates (x/c, y/c), first and
-        last row typically duplicate the trailing edge (closed loop).
-    n_span : int
-        Number of spanwise segments (stations = n_span + 1).
-    """
-    import capytaine as cpt
-
-    raw_coords = np.asarray(raw_coords, dtype=float)
-    if raw_coords.ndim != 2 or raw_coords.shape[1] != 2:
-        raise ValueError("raw_coords must have shape (N, 2)")
-
-    if n_chord is not None:
-        perimeter = _resample_closed_contour(raw_coords, int(n_chord))
-    else:
-        perimeter = raw_coords[:-1].copy()
-    n_per = perimeter.shape[0]
-    if n_per < 3:
-        raise ValueError("Need at least 3 perimeter points")
-
-    xea = float(xea_factor) * chord
-
-    y_sta = np.linspace(0.0, beam_length, n_span + 1)
-    verts_list = []
-    for y in y_sta:
-        x_phys = (perimeter[:, 0] * chord) - xea
-        z_phys = perimeter[:, 1] * chord
-        sec = np.column_stack([x_phys, np.full(n_per, y), z_phys])
-        verts_list.append(sec)
-    vertices = np.vstack(verts_list)
-
-    # Optional dihedral (rotation about span axis Y), then angle of attack like rotate_beam_model_y
-    R_tot = _rotation_y(alpha_deg) @ _rotation_y(dihedral_deg)
-    vertices = np.einsum("ij,nj->ni", R_tot, vertices)
-
-    if offset is not None:
-        vertices = vertices + np.asarray(offset, dtype=float).reshape(1, 3)
-
-    faces = []
-
-    # Lateral surface (quads along perimeter × span)
-    for i in range(n_span):
-        for j in range(n_per):
-            jn = (j + 1) % n_per
-            i00 = i * n_per + j
-            i01 = i * n_per + jn
-            i10 = (i + 1) * n_per + j
-            i11 = (i + 1) * n_per + jn
-            faces.append([i00, i01, i11, i10])
-
-    ile = int(np.argmin(perimeter[:, 0]))
-
-    # Root / tip caps: symmetric strips (pair ile-k with ile+k), not LE triangle fan.
-    faces.extend(_symmetric_section_cap_faces(0, ile, n_per, tip=False))
-    tip0 = n_span * n_per
-    faces.extend(_symmetric_section_cap_faces(tip0, ile, n_per, tip=True))
-
-    faces_arr = np.asarray(faces, dtype=np.int64)
-    mesh = cpt.Mesh(vertices=vertices, faces=faces_arr, name=name)
-
-    # Do not call heal_normals here: compute_connectivity assumes a conformal
-    # manifold; foil meshes often have TE-like topology where an edge is shared
-    # by more than two panels, which raises RuntimeError.
-    return mesh
+    gmsh_lc: float | None = None,
+    name: str = "NACA0003_mesh",
+):
+    """Same as :func:`build_extruded_airfoil_mesh_gmsh` with default mesh name."""
+    return build_extruded_airfoil_mesh_gmsh(
+        beam_length=beam_length,
+        chord=chord,
+        raw_coords=raw_coords,
+        xea_factor=xea_factor,
+        n_span=n_span,
+        n_chord=n_chord,
+        alpha_deg=alpha_deg,
+        dihedral_deg=dihedral_deg,
+        pitch_deg=pitch_deg,
+        offset=offset,
+        gmsh_lc=gmsh_lc,
+        name=name,
+    )
 
 
 def build_ABRAMSON1965_mesh(
@@ -235,77 +306,26 @@ def build_ABRAMSON1965_mesh(
     n_chord: int | None = None,
     alpha_deg: float = 0.0,
     dihedral_deg: float = 0.0,
+    pitch_deg: float = 0.0,
     offset: np.ndarray | None = None,
-    name: str = "ABRAMSON1965_mesh"):
-    """
-    Loft the closed airfoil polygon along span and close with root/tip caps.
-
-    Parameters
-    ----------
-    raw_coords : (N, 2) array
-        Section polygon in chord-normalized coordinates (x/c, y/c), first and
-        last row typically duplicate the trailing edge (closed loop).
-    n_span : int
-        Number of spanwise segments (stations = n_span + 1).
-    """
-    import capytaine as cpt
-
-    raw_coords = np.asarray(raw_coords, dtype=float)
-    if raw_coords.ndim != 2 or raw_coords.shape[1] != 2:
-        raise ValueError("raw_coords must have shape (N, 2)")
-
-    if n_chord is not None:
-        perimeter = _resample_closed_contour(raw_coords, int(n_chord))
-    else:
-        perimeter = raw_coords[:-1].copy()
-    n_per = perimeter.shape[0]
-    if n_per < 3:
-        raise ValueError("Need at least 3 perimeter points")
-
-    xea = float(xea_factor) * chord
-
-    y_sta = np.linspace(0.0, beam_length, n_span + 1)
-    verts_list = []
-    for y in y_sta:
-        x_phys = (perimeter[:, 0] * chord) - xea
-        z_phys = perimeter[:, 1] * chord
-        sec = np.column_stack([x_phys, np.full(n_per, y), z_phys])
-        verts_list.append(sec)
-    vertices = np.vstack(verts_list)
-
-    # Optional dihedral (rotation about span axis Y), then angle of attack like rotate_beam_model_y
-    R_tot = _rotation_y(alpha_deg) @ _rotation_y(dihedral_deg)
-    vertices = np.einsum("ij,nj->ni", R_tot, vertices)
-
-    if offset is not None:
-        vertices = vertices + np.asarray(offset, dtype=float).reshape(1, 3)
-
-    faces = []
-
-    # Lateral surface (quads along perimeter × span)
-    for i in range(n_span):
-        for j in range(n_per):
-            jn = (j + 1) % n_per
-            i00 = i * n_per + j
-            i01 = i * n_per + jn
-            i10 = (i + 1) * n_per + j
-            i11 = (i + 1) * n_per + jn
-            faces.append([i00, i01, i11, i10])
-
-    ile = int(np.argmin(perimeter[:, 0]))
-
-    # Root / tip caps: symmetric strips (pair ile-k with ile+k), not LE triangle fan.
-    faces.extend(_symmetric_section_cap_faces(0, ile, n_per, tip=False))
-    tip0 = n_span * n_per
-    faces.extend(_symmetric_section_cap_faces(tip0, ile, n_per, tip=True))
-
-    faces_arr = np.asarray(faces, dtype=np.int64)
-    mesh = cpt.Mesh(vertices=vertices, faces=faces_arr, name=name)
-
-    # Do not call heal_normals here: compute_connectivity assumes a conformal
-    # manifold; foil meshes often have TE-like topology where an edge is shared
-    # by more than two panels, which raises RuntimeError.
-    return mesh
+    gmsh_lc: float | None = None,
+    name: str = "ABRAMSON1965_mesh",
+):
+    """Same as :func:`build_extruded_airfoil_mesh_gmsh` with default mesh name."""
+    return build_extruded_airfoil_mesh_gmsh(
+        beam_length=beam_length,
+        chord=chord,
+        raw_coords=raw_coords,
+        xea_factor=xea_factor,
+        n_span=n_span,
+        n_chord=n_chord,
+        alpha_deg=alpha_deg,
+        dihedral_deg=dihedral_deg,
+        pitch_deg=pitch_deg,
+        offset=offset,
+        gmsh_lc=gmsh_lc,
+        name=name,
+    )
 
 
 def _try_export(mesh, path: str) -> None:
@@ -386,6 +406,21 @@ def main():
         help="Perimeter points on interpolated contour (override; default comes from cfg.mesh_n_chord).",
     )
     parser.add_argument(
+        "--gmsh-lc",
+        type=float,
+        default=None,
+        metavar="LC",
+        help="Gmsh characteristic length at section control points [m]. "
+        "If omitted, a value is derived from chord, span, and n_chord / n_span.",
+    )
+    parser.add_argument(
+        "--pitch",
+        type=float,
+        default=None,
+        metavar="DEG",
+        help="Structural pitch about +X [deg]. If omitted, uses AnalysisConfig.pitch from the case file.",
+    )
+    parser.add_argument(
         "--offset-z",
         type=float,
         default=0.0,
@@ -424,6 +459,14 @@ def main():
     n_chord = int(args.n_chord) if args.n_chord is not None else getattr(cfg, "mesh_n_chord", None)
     n_chord = int(n_chord) if n_chord is not None else None
 
+    if args.pitch is not None:
+        pitch_deg = float(args.pitch)
+        print(f"Structural pitch about +X: pitch = {pitch_deg:g} deg (--pitch override)")
+    else:
+        pitch_deg = float(getattr(cfg, "pitch", 0.0))
+        if abs(pitch_deg) > 1e-12:
+            print(f"Structural pitch about +X: pitch = {pitch_deg:g} deg (from config.pitch)")
+
     if args.use_config_offset_z:
         dz = float(getattr(cfg, "offset_z", 0.0))
         print(f"Mesh Z translation from config offset_z = {dz:g} m (--use-config-offset-z)")
@@ -436,6 +479,8 @@ def main():
 
     offset = np.array([0.0, 0.0, dz], dtype=float)
 
+    gmsh_lc = args.gmsh_lc
+
     if args.case_name == "NACA0003":
         mesh = build_naca0003_mesh(
             beam_length=float(cfg.beam_length),
@@ -446,7 +491,9 @@ def main():
             n_chord=n_chord,
             alpha_deg=float(getattr(cfg, "alpha_deg", 0.0)),
             dihedral_deg=float(getattr(cfg, "dihedral_angle", 0.0)),
+            pitch_deg=pitch_deg,
             offset=offset,
+            gmsh_lc=gmsh_lc,
             name="NACA0003",
         )
 
@@ -460,7 +507,9 @@ def main():
             n_chord=n_chord,
             alpha_deg=float(getattr(cfg, "alpha_deg", 0.0)),
             dihedral_deg=float(getattr(cfg, "dihedral_angle", 0.0)),
+            pitch_deg=pitch_deg,
             offset=offset,
+            gmsh_lc=gmsh_lc,
             name="ABRAMSON1965",
         )
     else:

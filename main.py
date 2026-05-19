@@ -49,13 +49,16 @@ from panelaero_utl import plotting_git
 import numpy as np
 
 
-def run_flutter_analysis_single(case_name, alpha_deg):
+def run_flutter_analysis_single(case_name, alpha_deg, *, n_lag=None, vg_vf_output_tag=None):
     """
     Run flutter analysis for a single angle of attack.
     
     Args:
         case_name: Name of the case (e.g., 'GOLAND')
         alpha_deg: Single angle of attack in degrees
+        n_lag: If not None, override ``AnalysisConfig.n_lag`` (Roger / RFA+PK augmented state size).
+        vg_vf_output_tag: Optional suffix for ``plot_vg_vf`` outputs (PNG/CSV). If None and
+            ``n_lag`` is set, defaults to ``nlag<n_lag>``.
         
     Returns:
         flutter_results: FlutterResults object
@@ -63,6 +66,13 @@ def run_flutter_analysis_single(case_name, alpha_deg):
     """
     ## == 1. LOAD CONFIGURATION == ##
     analysis_config = config.get_config(case_name)
+
+    if n_lag is not None:
+        nl = int(n_lag)
+        if nl < 1:
+            raise ValueError(f"n_lag must be >= 1, got {nl}")
+        analysis_config.n_lag = nl
+        print(f"  (override) n_lag = {nl}")
 
     # Normalise alpha: stamp the requested value and ensure alpha_r is a tuple
     analysis_config.alpha_deg = alpha_deg
@@ -157,6 +167,33 @@ def run_flutter_analysis_single(case_name, alpha_deg):
         analysis_config.aerogrid_path,
         aero_source=analysis_config.aero_source
     )
+
+    # ABRAMSON1965: optional structural pitch about +X after Y-reference build
+    # (beam, global K/M, modes, aerogrid) — see post_pitch_utils.
+    if analysis_config.name == "ABRAMSON1965" and abs(
+        float(getattr(analysis_config, "pitch", 0.0))
+    ) > 1e-12:
+        import post_pitch_utils
+
+        rotate_beam = bool(getattr(analysis_config, "pitch_rotate_beam", True))
+        rotate_aerogrid = bool(getattr(analysis_config, "pitch_rotate_aerogrid", True))
+        structural_results, beam_model, aerogrid = post_pitch_utils.apply_structural_pitch_about_x(
+            beam_model,
+            structural_results,
+            aerogrid,
+            float(analysis_config.pitch),
+            rotate_beam=rotate_beam,
+            rotate_aerogrid=rotate_aerogrid,
+        )
+        targets = []
+        if rotate_beam:
+            targets.append("beam (K/M, modes)")
+        if rotate_aerogrid:
+            targets.append("aerogrid")
+        print(
+            f"Applied structural pitch {float(analysis_config.pitch):.4f}° about +X "
+            f"(post-build: {', '.join(targets) or 'none'})."
+        )
     
     # Plot the aerogrid
     try:
@@ -186,8 +223,6 @@ def run_flutter_analysis_single(case_name, alpha_deg):
             n_frames=analysis_config.animation_frames
         )
 
-    # Compute fluid at rest frequencies
-    #----------------------------
 
     # 6. Solve for Flutter
     flutter_results = flutter_solver.solve(
@@ -220,17 +255,26 @@ def run_flutter_analysis_single(case_name, alpha_deg):
             print(f"Warning: Could not initialize flutter force tracking: {e}")
     
     # 7. Post-process and Visualize
-    post_processing.plot_vg_vf(flutter_results, analysis_config)
+    tag = vg_vf_output_tag
+    if tag is None and n_lag is not None:
+        tag = f"nlag{int(n_lag)}"
+    post_processing.plot_vg_vf(flutter_results, analysis_config, output_tag=tag)
     # Eigenvalue trajectory plot only available for PK method (not for Roger RFA)
     if flutter_results.raw_results is not None:
         post_processing.plot_eigenvalue_trajectory(flutter_results, flutter_results.raw_results, analysis_config)
+        if getattr(analysis_config, "plot_pk_wet_eigenvectors", False):
+            post_processing.plot_pk_converged_wet_eigenvectors(flutter_results, analysis_config)
     else:
         print("\nNote: Eigenvalue trajectory plot not available for Roger RFA method (uses direct eigenvalue sweep)")
-    # Stiffness/damping contributions only available for PK method
-    if flutter_results.pk_solver is not None:
-        post_processing.plot_stiffness_damping_contributions(pk_solver=flutter_results.pk_solver, config=analysis_config)
-    else:
-        print("Note: Stiffness/damping contributions plot not available for Roger RFA method")
+    if getattr(analysis_config, "plot_stiffness_damping_contributions", True):
+        post_processing.plot_stiffness_damping_contributions(
+            pk_solver=flutter_results.pk_solver,
+            flutter_results=flutter_results,
+            config=analysis_config,
+            show_plot=getattr(analysis_config, "show_stiffness_damping_contributions_plot", False),
+        )
+    if getattr(analysis_config, 'plot_DLM_participants', False):
+        post_processing.plot_DLM_participants(flutter_results, config=analysis_config)
     
     print(f"✓ Flutter analysis completed for α = {alpha_deg}°")
     if flutter_results.flutter_speed is not None:
@@ -252,6 +296,7 @@ if __name__ == "__main__":
 Examples:
   python main.py GOLAND
   python main.py tnz_multibody
+  python main.py ABRAMSON1965 --n-lag-list 2,3,4,5
         """
     )
     parser.add_argument(
@@ -260,9 +305,29 @@ Examples:
         default="GOLAND",
         help="Analysis case name (e.g. GOLAND, tnz_multibody, grid_conv). Default: GOLAND",
     )
+    parser.add_argument(
+        "--n-lag-list",
+        type=str,
+        default="",
+        metavar="N1,N2,...",
+        help="Comma-separated Roger lag-state counts (n_lag). Runs the full analysis once per "
+        "value and writes vg_vf_combined_<tag>.png (and matching CSVs) under output_dir. "
+        "Empty: use n_lag from the case config (single run, default filenames).",
+    )
 
     args = parser.parse_args()
     case_name = args.case_name
+
+    def _parse_n_lag_list(s: str) -> list[int]:
+        parts = [p.strip() for p in str(s).replace(";", ",").split(",")]
+        out: list[int] = []
+        for p in parts:
+            if not p:
+                continue
+            out.append(int(p))
+        return out
+
+    n_lag_sweep = _parse_n_lag_list(args.n_lag_list)
 
     # Setup logging to file
     log_dir = os.path.join(FSI_path, 'output_data')
@@ -286,7 +351,14 @@ Examples:
         if isinstance(alpha_deg, (list, tuple, np.ndarray)):
             alpha_deg = alpha_deg[0]
 
-        run_flutter_analysis_single(case_name, alpha_deg)
+        if n_lag_sweep:
+            for i_nl, nl in enumerate(n_lag_sweep):
+                print(f"\n{'='*70}")
+                print(f"n_lag sweep {i_nl + 1}/{len(n_lag_sweep)}: n_lag = {nl}")
+                print(f"{'='*70}\n")
+                run_flutter_analysis_single(case_name, alpha_deg, n_lag=nl)
+        else:
+            run_flutter_analysis_single(case_name, alpha_deg)
     
     finally:
         sys.stdout = logger.terminal

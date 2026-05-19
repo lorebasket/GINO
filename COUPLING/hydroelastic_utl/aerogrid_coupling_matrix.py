@@ -2,6 +2,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+
+def _infer_beam_span_axis(node_positions, beam_model=None):
+    """Global axis (0,1,2) with largest nodal span; optional beam_model['beam_span_axis'] override."""
+    if beam_model is not None and beam_model.get("beam_span_axis") is not None:
+        return int(beam_model["beam_span_axis"])
+    node_positions = np.asarray(node_positions, dtype=float)
+    if node_positions.shape[0] < 2:
+        return 1
+    return int(np.argmax(np.ptp(node_positions, axis=0)))
+
+
 class AeroGridToFEM:
     def __init__(self, beam_model):
         self.beam_model = beam_model
@@ -23,8 +34,11 @@ class AeroGridToFEM:
         self.panel_to_node_map = []
         self.panel_xi_map = []  # Store xi for visualization
 
+        span_axis = _infer_beam_span_axis(node_positions, beam_model)
+        if debug:
+            print(f"  Aero–FEM spline: bracketing beam along global axis {span_axis} (0=X, 1=Y, 2=Z)")
+
         for i_panel in range(n_panels):
-            span_axis = 1  # 0:X, 1:Y, 2:Z
             y_nodes = node_positions[:, span_axis]
             sort_idx = np.argsort(y_nodes)
             y_sorted = y_nodes[sort_idx]
@@ -71,26 +85,13 @@ class AeroGridToFEM:
                 l_1 = corner2 - corner1  # chordwise at root
                 l_2 = id_to_coords[int(panel_corner_ids[2])] - corner4  # chordwise at tip (corner3 - corner4)
                 l_m = (l_1 + l_2) / 2.0  # mean chordwise vector
-                
-                # Calculate elastic axis position for this panel: corner1 + xea_factor * l_m
-                # This gives the elastic axis position relative to the panel's corner points
-                x_elastic_axis_panel = corner1[0] + xea_factor * l_m[0]
-                
-                # Delta_x = distance from elastic axis (of this panel) to control point (75% chord)
-                Delta_x = ctrl[0] - x_elastic_axis_panel
-            else:
-                # Fallback: use interpolated beam point (assumes nodes are on elastic axis)
-                beam_point = N1 * node_positions[i_node_1] + N2 * node_positions[i_node_2]
-                Delta_x = ctrl[0] - beam_point[0]  # x-coordinate difference (chordwise)
-            
-            # ---- FULL 3D RIGID BODY PROJECTION ----
-            n = normal / np.linalg.norm(normal)  # safety normalization
 
-            # Elastic axis point for this panel (3D)
-            if xea_factor is not None and 'cornerpoint_panels' in aerogrid:
-                ea_point = np.array([x_elastic_axis_panel, ctrl[1], ctrl[2]])
+                ea_point = corner1 + float(xea_factor) * l_m
             else:
                 ea_point = N1 * node_positions[i_node_1] + N2 * node_positions[i_node_2]
+
+            # ---- FULL 3D RIGID BODY PROJECTION ----
+            n = normal / np.linalg.norm(normal)  # safety normalization
 
             r_vec = ctrl - ea_point  # 3D arm vector
 
@@ -293,7 +294,7 @@ class AeroGridToFEM:
         profile_z = np.array(airfoil_profile['z'])
         
         # Find the spanwise range
-        all_y_coords = grid_coords[:, 1]
+        all_y_coords = grid_coords[:, 2]
         y_min, y_max = np.min(all_y_coords), np.max(all_y_coords)
         
         # Generate spanwise positions for sections
@@ -435,7 +436,7 @@ def plot_chordwise_strip(aerogrid, y_target=3.0, xea_factor=None, xcm_factor=Non
     offset_l = aerogrid['offset_l']  # Force points (25% chord)?
     
     # Find panels near y_target
-    y_coords = offset_j[:, 1]  # y coordinates of control points
+    y_coords = offset_j[:, 2]  # y coordinates of control points
     y_diff = np.abs(y_coords - y_target)
     min_diff = np.min(y_diff)
     tolerance = 0.1  # tolerance for finding panels at similar y
@@ -478,7 +479,7 @@ def plot_chordwise_strip(aerogrid, y_target=3.0, xea_factor=None, xcm_factor=Non
         
         # Find first panel at root (y=0 or minimum y)
         # Get all panels and find the one with minimum y coordinate
-        all_y_coords = offset_j[:, 1]
+        all_y_coords = offset_j[:, 2]
         root_panel_idx = np.argmin(all_y_coords)  # Panel closest to root
         
         # Get corner points of root panel
@@ -630,7 +631,7 @@ def plot_full_wing(aerogrid, xea_factor=None, xcm_factor=None, config=None, save
         id_to_coords = {int(gid): coord for gid, coord in zip(grid_ids, grid_coords)}
         
         # Find first and last panel at root (y=0 or minimum y)
-        all_y_coords = offset_j[:, 1]
+        all_y_coords = offset_j[:, 2]
         root_panels = np.where(all_y_coords <= np.min(all_y_coords) + 0.01)[0]
         
         if len(root_panels) > 1:
@@ -753,8 +754,8 @@ def build_Z_force(aerogrid, panel_to_node_map, panel_xi_map, node_positions, bea
     force_points = aerogrid['offset_l']  # Fallback
     
     normals = aerogrid["N"]/ np.linalg.norm(aerogrid["N"], axis=1)[:, None]        # (n_panels, 3)
-    print(f"Building Z_force: {normals[0]} panels, {n_dofs} DOFs")
     n_panels = normals.shape[0]
+    print(f"Building Z_force: {n_panels} panels, {n_dofs} DOFs")
     
     Z_force = np.zeros((n_panels, n_dofs), dtype=float)
     
@@ -789,24 +790,12 @@ def build_Z_force(aerogrid, panel_to_node_map, panel_xi_map, node_positions, bea
             l_1 = corner2 - corner1  # chordwise at root
             l_2 = id_to_coords[int(panel_corner_ids[2])] - corner4  # chordwise at tip
             l_m = (l_1 + l_2) / 2.0  # mean chordwise vector
-            
-            # Calculate elastic axis position for this panel
-            x_elastic_axis_panel = corner1[0] + xea_factor * l_m[0]
-            
-            # Delta_x_fp = distance from elastic axis (of this panel) to force point (25% chord)
-            Delta_x_fp = force_pt[0] - x_elastic_axis_panel
-        else:
-            # Fallback: use interpolated beam point (assumes nodes are on elastic axis)
-            beam_point = N1 * node_positions[i_node_1] + N2 * node_positions[i_node_2]
-            Delta_x_fp = force_pt[0] - beam_point[0]  # x-coordinate difference (chordwise)
-        
-        n = normal / np.linalg.norm(normal)
 
-        # Elastic axis point
-        if xea_factor is not None and 'cornerpoint_panels' in aerogrid:
-            ea_point = np.array([x_elastic_axis_panel, force_pt[1], force_pt[2]])
+            ea_point = corner1 + float(xea_factor) * l_m
         else:
             ea_point = N1 * node_positions[i_node_1] + N2 * node_positions[i_node_2]
+
+        n = normal / np.linalg.norm(normal)
 
         r_vec = force_pt - ea_point
 
@@ -833,7 +822,7 @@ def build_Z_force(aerogrid, panel_to_node_map, panel_xi_map, node_positions, bea
     return Z_force
 
 
-def build_Z_qs(aerogrid, panel_to_node_map, panel_xi_map, n_dofs):
+def build_Z_qs(aerogrid, panel_to_node_map, panel_xi_map, n_dofs, node_positions=None, beam_model=None):
 
     normals = aerogrid["N"] / np.linalg.norm(aerogrid["N"], axis=1)[:, None]
     n_panels = normals.shape[0]
@@ -841,6 +830,11 @@ def build_Z_qs(aerogrid, panel_to_node_map, panel_xi_map, n_dofs):
     Z_qs = np.zeros((n_panels, n_dofs), dtype=float)
 
     ex = np.array([1.0, 0.0, 0.0])  # flow direction
+
+    span_axis = _infer_beam_span_axis(node_positions, beam_model) if node_positions is not None else 1
+    ey = np.zeros(3)
+    ey[span_axis] = 1.0
+    theta_dof = 3 + span_axis
 
     for ip in range(n_panels):
 
@@ -851,19 +845,13 @@ def build_Z_qs(aerogrid, panel_to_node_map, panel_xi_map, n_dofs):
         N1 = 1.0 - xi
         N2 = xi
 
-        # ===== rotational projection consistent with rigid mapping =====
-        # unit rotation about y
-        ey = np.array([0.0, 1.0, 0.0])
-
         rot_proj = n @ np.cross(ey, ex)
 
-        # Node 1
         idx = i_node_1 * 6
-        Z_qs[ip, idx + 4] += N1 * rot_proj
+        Z_qs[ip, idx + theta_dof] += N1 * rot_proj
 
-        # Node 2
         idx = i_node_2 * 6
-        Z_qs[ip, idx + 4] += N2 * rot_proj
+        Z_qs[ip, idx + theta_dof] += N2 * rot_proj
 
     return Z_qs
 

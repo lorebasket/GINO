@@ -1,6 +1,9 @@
 import os
 import numpy as np
 
+from FEA.fea_utl.multibody_assembly import T6_for_element
+
+
 def _save_global_matrix_to_csv(M_global, config):
 
     import csv
@@ -16,8 +19,7 @@ def _save_global_matrix_to_csv(M_global, config):
     # ========================================================================
     # SAVE GLOBAL MASS MATRIX (M_global)
     # ========================================================================
-    matrix_name = f"{M_global=}"
-    m_file = os.path.join(output_dir, f"{config_name}_{matrix_name}.csv")
+    m_file = os.path.join(output_dir, f"{config_name}_M_global.csv")
     
     try:
         np.savetxt(m_file, M_global, delimiter=',', fmt='%.10e')
@@ -149,30 +151,22 @@ def assemble_global_mass_matrix(beam_model, config):
     M_global = np.zeros((total_dof, total_dof), dtype=float)
 
     dof_per_node = 6
+    nodes = beam_model["nodes"]
 
     for element in beam_model["elements"]:
         node1_idx, node2_idx = element["nodes"]
         L = element["length"]
-        element_mass = element["mass"]  # 6x6, may be rotated to global frame
+        element_mass = element["mass"]  # 6x6, in global [u,v,w,θx,θy,θz]
 
-        # For multibody rotated sub-beams, T6 is stored on the element.
-        # Recover local sectional mass (T orthogonal → T^{-1} = T^T) before
-        # computing the consistent element mass matrix (N^T m N), then
-        # transform the resulting 12×12 back to global.
-        T6 = element.get('T6', None)
-        if T6 is not None:
-            T6 = np.array(T6, dtype=float)
-            m_local = T6.T @ element_mass @ T6
-        else:
-            m_local = element_mass
+        T6 = T6_for_element(element, nodes)
+        m_local = T6.T @ element_mass @ T6
 
         M_e = calculate_element_mass_matrix(m_local, L)  # 12x12 in local frame
 
-        if T6 is not None:
-            T12 = np.zeros((12, 12), dtype=float)
-            T12[:6, :6] = T6
-            T12[6:, 6:] = T6
-            M_e = T12 @ M_e @ T12.T
+        T12 = np.zeros((12, 12), dtype=float)
+        T12[:6, :6] = T6
+        T12[6:, 6:] = T6
+        M_e = T12 @ M_e @ T12.T
 
         # Build local->global index map
         local_to_global = np.array([

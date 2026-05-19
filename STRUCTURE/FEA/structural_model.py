@@ -59,13 +59,17 @@ def _build_naca0003_model(config):
     # =========================================================================
     # 1.  CONFIGURATION PARAMETERS  (read-only, all come from config.py)
     # =========================================================================
-    E           = config.E              # Young's modulus                 [Pa]
-    rho_s       = config.rho_s         # Material density                 [kg/m³]
-    v_poisson   = config.v             # Poisson's ratio                  [–]
-    beam_length = config.beam_length   # Full span (clamped-clamped)      [m]
-    chord       = config.chord         # Chord length                     [m]
-    raw_coords  = config.raw           # Normalised airfoil coords (N×2)
-    n_elements  = config.n_elements    # Number of beam elements
+    E           = config.E              # Young's modulus                  [Pa]
+    shear_factor = config.shear_factor  # Shear factor                     [–]
+    xcm_factor = config.xcm_factor      # CG offset factor                 [–]
+    xea_factor = config.xea_factor      # EA offset factor                 [–]
+    rho_s       = config.rho_s          # Material density                 [kg/m³]
+    v_poisson   = config.v              # Poisson's ratio                  [–]
+    beam_length = config.beam_length    # Full span (clamped-clamped)      [m]
+    chord       = config.chord          # Chord length                     [m]
+    pitch       = config.pitch          # Pitch angle                      [deg]
+    raw_coords  = config.raw            # Normalised airfoil coords (N×2)
+    n_elements  = config.n_elements     # Number of beam elements
  
     G = E / (2.0 * (1.0 + v_poisson))  # Shear modulus  [Pa]
  
@@ -101,21 +105,7 @@ def _build_naca0003_model(config):
     y_centroid = y_centroid / area if area > 0 else 0.0
  
     # ── 2c.  Second moments – FIX 1: Green's theorem exact formula ───────────
-    #
-    # For a closed polygon with vertices (xᵢ, yᵢ) the EXACT second moments
-    # about the origin are (sign convention: CCW polygon positive area):
-    #
-    #   Ixx_0 = (1/12) · Σ (yᵢ² + yᵢ·yᵢ₊₁ + yᵢ₊₁²) · (xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ)
-    #   Iyy_0 = (1/12) · Σ (xᵢ² + xᵢ·xᵢ₊₁ + xᵢ₊₁²) · (xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ)
-    #
-    # Shift to section centroid via the parallel axis theorem:
-    #   Ixx = |Ixx_0| − A · ȳ²
-    #   Iyy = |Iyy_0| − A · x̄²
-    #
-    # The original code used Σ dy²·dA (centroid-of-triangle × area), which
-    # drops the self-inertia of each triangular panel and underestimates
-    # Ixx/Iyy by ~11 %.
-    # ─────────────────────────────────────────────────────────────────────────
+
     Ixx_0 = 0.0
     Iyy_0 = 0.0
     Ixy_0 = 0.0
@@ -137,22 +127,7 @@ def _build_naca0003_model(config):
     # Ixy not used in the beam model (symmetric section → Ixy ≈ 0)
  
     # ── 2d.  Torsional constant – FIX 2: Saint-Venant thin-section formula ───
-    #
-    # For a solid section whose local thickness is much smaller than the chord
-    # (t/c ≈ 0.036 here), the Saint-Venant torsional constant is:
-    #
-    #   J_SV = (1/3) · ∫₀^c (2·y_upper(x))³ dx
-    #
-    # This is evaluated numerically from the upper-surface coordinates.
-    #
-    # The original code used J = Ixx + Iyy = Ip (polar second moment).
-    # Ip = J only for circular cross-sections.  For a thin foil (c/t >> 1),
-    # Iyy >> Ixx so Ip >> J_SV by a factor of ~196.  This grossly
-    # overestimates GJ and produces incorrect torsional natural frequencies.
-    #
-    # Note: J_SV ≈ 4 · Ixx for a thin rectangular plate (Ixx = c·t³/12,
-    # J = c·t³/3), a useful sanity check.
-    # ─────────────────────────────────────────────────────────────────────────
+
     upper_mask   = y_norm >= 0.0
     x_up_norm    = x_norm[upper_mask]
     y_up_norm    = y_norm[upper_mask]
@@ -178,9 +153,8 @@ def _build_naca0003_model(config):
     EIyy  = E * Iyy      # edgewise bending (chord direction)
     GJ    = G * J        # torsion – now physically correct
  
-    shear_factor = 0.85   # Timoshenko shear correction for foil cross-sections
-    GAx = shear_factor * G * area
-    GAz = shear_factor * G * area
+    GAx = config.shear_factor * G * area
+    GAz = config.shear_factor * G * area
  
     # =========================================================================
     # 4.  MASS PROPERTIES  (solid-section estimate – considered reliable)
@@ -189,7 +163,8 @@ def _build_naca0003_model(config):
     i11 = rho_s * Iyy           # rotational inertia / m about section x
     i22 = rho_s * J             # rotational inertia / m about section y (torsion)
     i33 = rho_s * Ixx           # rotational inertia / m about section z
-    e_x = 0.0                   # CG offset (symmetric NACA0003 → zero)
+    #e_x = 0.0
+    e_x = (xcm_factor - xea_factor) * chord      # CG offset (symmetric NACA0003 → zero)
  
     print(f"\n  Mass properties:")
     print(f"    μ   = {mu:.6e} kg/m   (total mass = {mu*beam_length:.4f} kg)")
@@ -199,22 +174,6 @@ def _build_naca0003_model(config):
  
     # =========================================================================
     # 5.  EIxx CALIBRATION – FIX 3
-    #
-    # Target: f₁,vac = 321 Hz  (Cupr et al. 2018, Table 1, double-clamped).
-    # The solid-section formula gives EIxx ≈ 17 N·m² → f₁ ≈ 500 Hz (≈56 %
-    # too high).  The discrepancy is consistent with the real foil not being
-    # perfectly solid (machined interior, surface finish) and with residual
-    # compliance in the test clamps.
-    #
-    # Euler-Bernoulli clamped-clamped first mode:
-    #   ω₁ = (β₁L)² / L² · √(EIxx/μ)    with β₁L = 4.7300
-    #   ⟹ EIxx_cal = μ · (ω₁·L² / (β₁L)²)²
-    #
-    # μ is the solid-section estimate (area × density) and is NOT changed.
-    # Only EIxx is scaled; EIyy and GJ keep their geometry-based values.
-    # The calibration factor k = EIxx_cal / EIxx_geom ≈ 0.41 is printed for
-    # reference and stored in the beam_model dict.
-    # =========================================================================
     f1_vac_target = 321.0          # Hz  — Cupr et al. 2018
     beta1L        = 4.7300         # dimensionless — clamped-clamped mode 1
     omega1_target = 2.0 * np.pi * f1_vac_target
@@ -298,6 +257,8 @@ def _build_naca0003_model(config):
         agard_theory=True,
         flutter_benchmark=False,
         sonata=False,
+        center_beam=True,
+        chord=chord,
     )
  
     alpha_deg = getattr(config, 'alpha_deg', 0.0)
@@ -420,17 +381,24 @@ def _build_abramson_model(config):
     M[4, 4] = i11 + config.mu * e**2                       # θy (torsion about span)
     M[5, 5] = i33 + config.mu * e**2                      # θz (vertical bending)
 
+    # Reference layout: always use pitch=0 in create_beam_model; blade inclination
+    # is applied afterward as a rigid rotation of the whole beam model about +X.
     beam_model = create_beam_model(
-        K, M, config.beam_length, config.n_elements, config.pitch,
+        K, M, config.beam_length, config.n_elements, 0,
         agard_theory=False, flutter_benchmark=True, sonata=False,
         xea=xea, xcm=xcm, case_name='ABRAMSON1965'
     )
-    
-    beam_model = rotate_beam_model_y(beam_model, [config.alpha_deg])
-     
-    # Add matrices to the model for later use
-    beam_model['K_section'] = K
-    beam_model['M_section'] = M
+
+    alpha_deg = float(getattr(config, "alpha_deg", 0.0))
+    beam_model = rotate_beam_model_y(beam_model, [alpha_deg])
+
+    # Section 6×6 and mesh stay in the reference frame (beam along +Y after create);
+    # structural pitch about +X is applied after global K/M and aerogrid are built
+    # (see post_pitch_utils.apply_structural_pitch_about_x in main.py).
+    beam_model["K_section"] = K
+    beam_model["M_section"] = M
+    if abs(alpha_deg) > 1e-12:
+        print(f"  ABRAMSON1965: applied alpha {alpha_deg:.4f} deg about +Y on beam model (reference build).")
     
     # Optionally save the section stiffness and mass matrices to CSV files.
     # Controlled by config.save_matrices (bool). If True, matrices are written
@@ -450,8 +418,10 @@ def _build_abramson_model(config):
         m_file = os.path.join(matrices_dir, f"{model_name}_M_section.csv")
 
         try:
-            np.savetxt(k_file, K, delimiter=',', fmt='%.6e')
-            np.savetxt(m_file, M, delimiter=',', fmt='%.6e')
+            K_save = beam_model["K_section"]
+            M_save = beam_model["M_section"]
+            np.savetxt(k_file, K_save, delimiter=',', fmt='%.6e')
+            np.savetxt(m_file, M_save, delimiter=',', fmt='%.6e')
             print(f"Saved section stiffness matrix to {k_file}")
             print(f"Saved section mass matrix to {m_file}")
         except Exception as _e:

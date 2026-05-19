@@ -34,9 +34,9 @@ def main(start_time=None):
     from COUPLING.hydroelastic_utl.post_processing import plot_aero_beam_model
 
     # --- AEROGRID SETUP --- #
-    blade_name = 'wing01' # 'hollowell', 'wing01', 'GOLAND'
+    blade_name = 'ABRAMSON1965' # 'hollowell', 'wing01', 'GOLAND'
     fluid = 'water'
-    nspan = [4] # number of spanwise panels
+    nspan = [30] # number of spanwise panels
     AR = [0.5]  # aspect ratio
     DLM = True
     VLM = False
@@ -53,8 +53,8 @@ def main(start_time=None):
     c_sound = {'air': 332.5, 'water':1484.0} # speed of sound of air at 2000m altitude
 
     # --- LIST  --- #
-    k_list = np.round(np.concatenate([np.linspace(0.001, 1, 10), np.linspace(1, 4, 10), np.linspace(4, 30, 80)]), 3)
-    V_list = np.linspace(5, 55, 50)
+    k_list = np.round(np.concatenate([np.linspace(0.001, 1, 10), np.linspace(1, 4, 10), np.linspace(4, 60, 90)]), 3)
+    V_list = np.linspace(1, 30, 30)
     Ma_list = V_list / c_sound[fluid]
         
     # ===== Method ===== #
@@ -181,8 +181,8 @@ def main(start_time=None):
                 
                     # Elastic axis reference (at 0.33*chord from LE)
                     x1 = -xc_offset * chord_root; x4 = -xc_offset * chord_tip
-                    y1 = -0; y4 = beam_length
-                    z1 = 0; z4 = 0
+                    y1 = 0.0; y4 = 0.0
+                    z1 = -beam_length; z4 = 0.0
 
                     plot = True
 

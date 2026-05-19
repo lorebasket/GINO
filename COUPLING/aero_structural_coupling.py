@@ -19,7 +19,9 @@ def calculate_spline_matrix(beam_model, aerogrid, config):
     if hasattr(config, 'xea_factor'):
         xea_factor = config.xea_factor
         print(f"Using xea_factor={xea_factor:.4f} to calculate elastic axis position relative to each panel's corner points")
-    
+
+    node_positions = np.array([node['position'] for node in beam_model['nodes']])
+
     Z, panel_to_node_map, panel_xi_map = spline_main(
         beam_model,
         aerogrid=aerogrid,
@@ -58,11 +60,13 @@ def calculate_spline_matrix(beam_model, aerogrid, config):
         panel_areas = None
 
     # Z quasy steady (G_x for slope)
-    Z_qs = build_Z_qs(aerogrid, panel_to_node_map, panel_xi_map, total_dof)
+    Z_qs = build_Z_qs(
+        aerogrid, panel_to_node_map, panel_xi_map, total_dof,
+        node_positions=node_positions, beam_model=beam_model,
+    )
     Z_qs_constrained = cantilever_beam.cantilever_beam(Z_qs, total_dof, constrained_dofs=None, dof_per_node=6)
     
     # Z_force (G_f for force transfer at 25% chord)
-    node_positions = np.array([node['position'] for node in beam_model['nodes']])
     Z_force = build_Z_force(aerogrid, panel_to_node_map, panel_xi_map, node_positions, beam_model, total_dof, xea_factor=xea_factor)
     
     # Build Apan from Z_force^T @ A for theory compliance

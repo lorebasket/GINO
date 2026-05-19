@@ -14,7 +14,6 @@ def create_beam_model(K, M, beam_length, n_el, pitch, agard_theory=False, flutte
         beam_length: Length of the beam
         n_el: Number of elements
         pitch: Pitch angle
-        agard_theory: If True, uses AGARD per-element mode
         flutter_benchmark: If True, uses benchmark mode
         sonata: If True, uses SONATA partitioning
         xea: Shear center X coordinate [m] (for positioning nodes)
@@ -83,8 +82,7 @@ def create_beam_model(K, M, beam_length, n_el, pitch, agard_theory=False, flutte
     # Create node coordinates
     # -------------------------
     element_length   = beam_length / n_el
-    element_length_x = element_length * np.cos(np.deg2rad(pitch))
-    element_length_y = element_length * np.sin(np.deg2rad(pitch))
+    element_length_y = element_length
 
     # ── Node positioning: Shear Center for ABRAMSON1965, otherwise origin ──
     if case_name == 'ABRAMSON1965' and xea is not None:
@@ -95,18 +93,18 @@ def create_beam_model(K, M, beam_length, n_el, pitch, agard_theory=False, flutte
 
     nodes = []
     if pitch != 0:
-        if center_beam and chord is not None:
+        if center_beam:
             x_offset = chord / 2
         else:
             x_offset = 0.0
         for i in range(n_nodes):
             y = i * element_length_y  # span-wise
-            x = i * element_length_x  # stream-wise
             nodes.append({"position": [x_node_offset + x_offset, y, 0.0], "index": i})
     else:
-        if center_beam and chord is not None:
+        if center_beam:
             x_offset = chord / 2
-        else:            x_offset = 0.0
+        else:
+            x_offset = 0.0
         for i in range(n_nodes):
             y = i * element_length
             nodes.append({

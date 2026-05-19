@@ -78,11 +78,39 @@ def results_to_arrays(results, mode_indices, omega_min=1e-2):
             if omega < omega_min:
                 continue
 
-            # Damping ratio g = -σ/ω  (standard V-g convention)
-            g[iV, j] =  sigma / omega
+            # Damping ratio g = σ/ω  (standard V-g convention)
+            g[iV, j] = sigma / omega
             ω[iV, j] = omega
 
     return V, g, ω
+
+
+def damping_ratio_from_storage(damping, omega_rad, *, dimensionless_vgvf_results=True):
+    """
+    Damping ratio ζ = σ/ω from stored PK arrays.
+
+    If ``dimensionless_vgvf_results`` is True, ``damping`` is already σ/ω.
+    Otherwise ``damping`` is σ [rad/s] and is divided by ``omega_rad``.
+    """
+    zeta = np.asarray(damping, dtype=float)
+    if not dimensionless_vgvf_results:
+        omega_rad = np.maximum(np.asarray(omega_rad, dtype=float), 1e-12)
+        zeta = zeta / omega_rad
+    return zeta
+
+
+def log_decrement_from_storage(damping, omega_rad, *, dimensionless_vgvf_results=True):
+    """
+    Logarithmic decrement per cycle Λ ≈ 2π ζ = 2π (σ/ω).
+
+    For σ > 0 (stable in the PK convention used here), Λ > 0 (increasing motion),
+    aligning with Abramson's experimental δ trend (positive below flutter).
+    """
+    zeta = damping_ratio_from_storage(
+        damping, omega_rad, dimensionless_vgvf_results=dimensionless_vgvf_results
+    )
+    return 2.0 * np.pi * zeta
+
 
 def first_flutter_crossing(V, g_row):
     for i in range(len(V)-1):
@@ -97,23 +125,28 @@ def first_flutter_crossing(V, g_row):
             return Vf, i
     return None, None
 
-def plot_vg(V, g, title="V–g Diagram", outfile=None, annotate=True):
+def plot_vg(V, g, title="V–g Diagram", outfile=None, annotate=True, v_knots=False):
+    V_plot = np.asarray(V, dtype=float)
+    v_unit = "m/s"
+    if v_knots:
+        V_plot = V_plot * 1.94384
+        v_unit = "kn"
     plt.figure(figsize=(9,5))
     for j in range(g.shape[1]):
-        plt.plot(V, g[:, j], label=f"Branch {j+1}")
+        plt.plot(V_plot, g[:, j], label=f"Branch {j+1}")
     plt.axhline(0.0, linestyle="--", linewidth=1)
     if annotate:
         Vf_list = []
         for j in range(g.shape[1]):
             Vf, _ = first_flutter_crossing(V, g[:, j])
             if Vf is not None:
-                Vf_list.append(Vf)
+                Vf_list.append(Vf * 1.94384 if v_knots else Vf)
         if Vf_list:
             Vf = min(Vf_list)
             plt.axvline(Vf, linestyle="--", linewidth=1)
-            plt.text(Vf, plt.ylim()[1]*0.85, f"Vf ≈ {Vf:.1f} m/s", rotation=90,
+            plt.text(Vf, plt.ylim()[1]*0.85, f"Vf ≈ {Vf:.1f} {v_unit}", rotation=90,
                         ha="right", va="center")
-    plt.xlabel("Airspeed V [m/s]")
+    plt.xlabel("Airspeed V [knots]" if v_knots else "Airspeed V [m/s]")
     plt.ylabel("Damping ratio $\\zeta$ [-]")
     plt.title(title)
     plt.legend()
@@ -122,19 +155,27 @@ def plot_vg(V, g, title="V–g Diagram", outfile=None, annotate=True):
         plt.savefig(outfile, dpi=150)
     plt.show()
 
-
-
-def plot_vf(V, ω, title="V–ω Diagram", outfile=None, Vf=None):
+def plot_vf(V, ω, title="V–ω Diagram", outfile=None, Vf=None, v_knots=False, vf_hertz=False):
+    V_plot = np.asarray(V, dtype=float)
+    omega_plot = np.asarray(ω, dtype=float)
+    v_unit = "m/s"
+    if v_knots:
+        V_plot = V_plot * 1.94384
+        v_unit = "kn"
+    if vf_hertz:
+        omega_plot = omega_plot / (2.0 * np.pi)
+    Vf_plot = None
+    if Vf is not None and np.isfinite(Vf):
+        Vf_plot = float(Vf) * 1.94384 if v_knots else float(Vf)
     plt.figure(figsize=(8,4))
-    for j in range(ω.shape[1]):
-        plt.plot(V, ω[:, j], label=f"Branch {j+1}")
-    if Vf is not None:
-        plt.axvline(Vf, linestyle="--", linewidth=1)
-        plt.text(Vf, plt.ylim()[1]*0.85, f"Vf ≈ {Vf:.1f} m/s", rotation=90,
+    for j in range(omega_plot.shape[1]):
+        plt.plot(V_plot, omega_plot[:, j], label=f"Branch {j+1}")
+    if Vf_plot is not None:
+        plt.axvline(Vf_plot, linestyle="--", linewidth=1)
+        plt.text(Vf_plot, plt.ylim()[1]*0.85, f"Vf ≈ {Vf_plot:.1f} {v_unit}", rotation=90,
                     ha="right", va="center")
-    plt.xlabel("Airspeed V [m/s]")
-    # ω is returned in rad/s. If you want cycles/s (Hz) use ω/(2π) and label [Hz].
-    plt.ylabel("Frequency ω [rad/s]")
+    plt.xlabel("Airspeed V [knots]" if v_knots else "Airspeed V [m/s]")
+    plt.ylabel("Frequency ω [Hz]" if vf_hertz else "Frequency ω [rad/s]")
     plt.title(title)
     plt.legend()
     plt.tight_layout()

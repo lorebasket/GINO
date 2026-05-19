@@ -17,10 +17,18 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         sonata_name='wing01',
         sonata_case_name='wing01',
         fluid=fluid,
-        chord=2,
-        beam_length=10,
+
+        # ── Geometry ──────────────────────────────────────────────────────
         alpha_deg=attack_angle_deg,
         alpha_r=np.deg2rad(attack_angle_deg),
+        pitch=0,
+
+        # ── Methodology ───────────────────────────────────────────────────
+        pk_method=True,
+        roger_fit=False,
+        RFA_PK_method=False,
+
+        # ── Flutter sweep ─────────────────────────────────────────────────
         V_list=np.linspace(20, 50, 20),
         num_modes_flutter_egv=2,
         plot_aerobeam=True,

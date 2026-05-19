@@ -17,7 +17,20 @@ import numpy as np
 from numpy.linalg import norm
 
 
-def compute_mac(u1, u2):
+def _mac_mode_shapes(u1, u2, n_structural_dof=None):
+    """Optional slice to structural [q; q_dot] block before MAC (Roger augmented states)."""
+    u1 = np.asarray(u1, dtype=complex).ravel()
+    u2 = np.asarray(u2, dtype=complex).ravel()
+    if n_structural_dof is not None and n_structural_dof > 0:
+        n = int(n_structural_dof)
+        if u1.size >= n:
+            u1 = u1[:n]
+        if u2.size >= n:
+            u2 = u2[:n]
+    return u1, u2
+
+
+def compute_mac(u1, u2, n_structural_dof=None):
     """
     Modal Assurance Criterion (MAC) between two complex vectors.
     
@@ -43,11 +56,8 @@ def compute_mac(u1, u2):
     """
     if u1 is None or u2 is None:
         return 0.0
-    
-    # Ensure vectors are complex to handle both real and complex modes
-    u1 = np.asarray(u1, dtype=complex)
-    u2 = np.asarray(u2, dtype=complex)
-    
+
+    u1, u2 = _mac_mode_shapes(u1, u2, n_structural_dof)
     numerator = np.abs(u1.conj().T @ u2) ** 2
     denominator = (u1.conj().T @ u1) * (u2.conj().T @ u2)
     
@@ -192,8 +202,29 @@ def extract_structural_modes_from_augmented(eigenvalues, eigenvectors, n_modes, 
     return eigs_structural, vecs_structural, indices_selected, frequencies, damping
 
 
+def is_dummy_eigenpair(eigenvalue, eigenvector, omega_n, zeta_tol=0.005, vec_tol=1e-10):
+    """True for padded Roger roots (zero vector, zeta ~ -0.01, f ~ omega_n)."""
+    omega_n = np.asarray(omega_n, dtype=float).ravel()
+    freq = np.abs(np.imag(eigenvalue))
+    zeta = np.real(eigenvalue) / max(freq, 1e-12)
+    if norm(np.asarray(eigenvector, dtype=complex).ravel()) > vec_tol:
+        return False
+    if abs(zeta + 0.01) > zeta_tol:
+        return False
+    return np.any(np.abs(freq - omega_n) / np.maximum(omega_n, 1e-12) < 0.02)
+
+
+def should_mark_mode_lost(freq_rad, eigenvalue, eigenvector, omega_n, f_min_hz=2.0):
+    """Branch is lost if frequency is below threshold or eigenpair is a dummy placeholder."""
+    f_min_rad = float(f_min_hz) * 2.0 * np.pi
+    if not np.isfinite(freq_rad) or float(freq_rad) < f_min_rad:
+        return True
+    return is_dummy_eigenpair(eigenvalue, eigenvector, omega_n)
+
+
 def _select_modes_by_mac(eigs_candidates, vecs_candidates, freqs_candidates,
-                         eigs_all, vecs_all, freqs_previous, vecs_previous, n_modes):
+                         eigs_all, vecs_all, freqs_previous, vecs_previous, n_modes,
+                         n_structural_dof=None):
     """
     Select best n_modes from candidates using MAC matching with previous step.
     
@@ -231,7 +262,9 @@ def _select_modes_by_mac(eigs_candidates, vecs_candidates, freqs_candidates,
         for j_prev in range(n_prev):
             u_cand = vecs_candidates[:, i_cand]
             u_prev = vecs_previous[:, j_prev]
-            mac_matrix_cand[i_cand, j_prev] = compute_mac(u_cand, u_prev)
+            mac_matrix_cand[i_cand, j_prev] = compute_mac(
+                u_cand, u_prev, n_structural_dof=n_structural_dof
+            )
     
     # For each candidate, get best MAC with any previous mode
     best_mac_per_candidate = np.max(mac_matrix_cand, axis=1)
@@ -257,7 +290,7 @@ def _select_modes_by_mac(eigs_candidates, vecs_candidates, freqs_candidates,
 def match_modes_between_velocities(eigs_current, vecs_current, freqs_current,
                                     eigs_previous, vecs_previous, freqs_previous,
                                     freq_margin=0.15, w_freq=0.8, w_mac=0.6,
-                                    verbose=False):
+                                    n_structural_dof=None, verbose=False):
     """
     Match structural modes between consecutive velocity steps using MAC and frequency.
     
@@ -312,7 +345,7 @@ def match_modes_between_velocities(eigs_current, vecs_current, freqs_current,
                 print(f"  vecs_previous shape: {vecs_previous.shape}, ndim: {vecs_previous.ndim}")
                 raise
             
-            mac_val = compute_mac(u_curr, u_prev)
+            mac_val = compute_mac(u_curr, u_prev, n_structural_dof=n_structural_dof)
             mac_matrix[i, j] = mac_val
             
             # Frequency component (normalized error)

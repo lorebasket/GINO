@@ -2,7 +2,7 @@
 
 This folder contains the blade/foil geometry definitions and scripts used to compute cross-sectional structural properties (stiffness and mass matrices) via the **SONATA** and **ANBA4** frameworks.
 
-The outputs of these scripts (CSV files in each example's `csv_export/` subfolder) feed directly into the hydroelastic flutter analysis in `main.py`.
+The outputs of these scripts (CSV files in each example's `csv_export/` subfolder) feed directly into the hydroelastic flutter analysis in `main.py`. For cases that also use Capytaine BEM radiation, these structural properties are used first to compute the dry beam modes; those dry modes are required before running `FLUID/capytaine/run_modal_radiation.py`.
 
 ---
 
@@ -113,3 +113,4 @@ These CSV files are read by `main.py` when `aero_source = 'sonata'` is set in th
 - Units in the `.yaml` files are in **mm** for better meshing convergence. The scripts handle conversion to meters internally.
 - The `9_gitclone/` folder (not uploaded) also contains additional SONATA example blades (IEA 15MW, IEA 10MW, etc.) for reference.
 - For cases that do **not** require SONATA outputs (e.g. GOLAND, ABRAMSON1965), the structural properties are defined analytically in the case config file and these scripts do not need to be run.
+- The Capytaine BEM implementation and its validation are under development; current Abramson benchmark notes are in [`../../docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf`](../../docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf).

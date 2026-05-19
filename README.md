@@ -42,8 +42,10 @@ FSI/
 │
 ├── FLUID/
 │   ├── aerodynamic_model.py         ← Aerodynamic model assembly
-│   └── PanelAero/                   ← Qjj precomputation utilities
-│       └── README.md                ← ← See this for Qjj precomputation workflow
+│   ├── PanelAero/                   ← Qjj precomputation utilities
+│   │   └── README.md                ← ← See this for Qjj precomputation workflow
+│   └── capytaine/                   ← BEM mesh and modal radiation precomputation
+│       └── README.md                ← ← See this for Capytaine BEM workflow
 │
 ├── COUPLING/                        ← Aero-structural coupling + flutter solvers
 │   ├── aero_structural_coupling.py
@@ -92,7 +94,23 @@ Repository: [github.com/DLR-AE/PanelAero](https://github.com/DLR-AE/PanelAero)
 
 ---
 
-### 3. ANBA4 — cross-sectional stiffness solver (FEniCS-based)
+### 3. Capytaine — BEM added mass and radiation damping
+
+Capytaine provides the Boundary Element Method (BEM) solver used to compute frequency-dependent modal added-mass and radiation-damping matrices for hydroelastic correction.
+
+Install the BEM-specific packages with:
+
+```bash
+pip install capytaine gmsh meshio
+```
+
+The Capytaine radiation workflow requires an exported hydrodynamic mesh and, for modal runs, previously computed dry structural modes of the beam.
+
+> See [`FLUID/capytaine/README.md`](FLUID/capytaine/README.md) for the mesh generation and modal radiation workflow.
+
+---
+
+### 4. ANBA4 — cross-sectional stiffness solver (FEniCS-based)
 
 ANBA4 is the finite-element solver called by SONATA. It requires **FEniCS** (`dolfin`).  
 Install FEniCS first via conda (Linux / WSL only):
@@ -112,7 +130,7 @@ git clone https://github.com/ANBA4/anba4 anba4
 
 ---
 
-### 4. Python packages
+### 5. Python packages
 
 Install all remaining dependencies with:
 
@@ -120,7 +138,8 @@ Install all remaining dependencies with:
 pip install -r requirements.txt
 ```
 
-This covers: `numpy`, `scipy`, `matplotlib`, `pandas`, `pyyaml`, and `PanelAero`.
+This covers the core stack and PanelAero: `numpy`, `scipy`, `matplotlib`, `pandas`, `pyyaml`, and `PanelAero`.
+Install `capytaine`, `gmsh`, and `meshio` separately when using the BEM workflow.
 
 ---
 
@@ -161,7 +180,7 @@ Output (plots and logs) is saved to `output_plots/`.
         ↓
 3. Structural analysis         Dry natural frequencies and mode shapes
         ↓
-4. (optional) Wet modes        Fluid-at-rest frequency shift (non-circulatory added mass & damping)
+4. (optional) Capytaine BEM    Load precomputed modal added mass & radiation damping
         ↓
 5. Build aerodynamic model     Load precomputed aerogrid and Qjj matrices
         ↓
@@ -222,6 +241,26 @@ The case config file (`examples/<case_name>/config_<case_name>.py`) specifies wh
 
 ---
 
+## Precomputing Capytaine BEM Matrices
+
+Water cases can also use Capytaine BEM results for non-circulatory added mass and radiation damping. This is a separate preprocessing workflow from PanelAero.
+
+In short:
+
+```bash
+python FLUID/capytaine/build_capytaine_mesh.py --case_name ABRAMSON1965
+python main.py ABRAMSON1965  # generate dry beam modal CSV files
+python FLUID/capytaine/run_modal_radiation.py --case-name ABRAMSON1965
+```
+
+The `run_modal_radiation.py` step needs the dry beam modal CSV files already produced in `output_data/<case_name>/`. If the case uses SONATA structural properties, run the SONATA preprocessing before the dry modal step. The case config then points the flutter solver to `capytaine_results_dir`, `mesh_path`, `depth`, and `depth_index`.
+
+The validation of the Capytaine BEM implementation is under development. Current Abramson benchmark notes are collected in [`docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf`](docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf).
+
+See [`FLUID/capytaine/README.md`](FLUID/capytaine/README.md) for the full workflow.
+
+---
+
 ## Adding a New Case
 
 1. Create a folder `examples/<your_case>/`
@@ -229,7 +268,8 @@ The case config file (`examples/<case_name>/config_<case_name>.py`) specifies wh
    (copy an existing case as template, e.g. `examples/GOLAND/config_GOLAND.py`)
 3. Precompute the Qjj matrices for the new geometry using `FLUID/PanelAero/Qjj/executer.py`
 4. If structural properties come from SONATA, run the corresponding SONATA script first
-5. Run: `python main.py <your_case>`
+5. For Capytaine BEM correction, build the mesh and run `FLUID/capytaine/run_modal_radiation.py` after dry beam modes exist
+6. Run or rerun: `python main.py <your_case>`
 
 ---
 
@@ -247,7 +287,7 @@ Results are saved in `output_plots/`:
 
 ## Third-Party Software & Licenses
 
-This framework is built on top of two external open-source libraries that are dynamically linked (called at runtime) but are **not** distributed as part of this repository. Their source code, copyright, and license terms remain entirely with their respective authors.
+This framework is built on top of external open-source libraries that are dynamically linked (called at runtime) but are **not** distributed as part of this repository. Their source code, copyright, and license terms remain entirely with their respective authors.
 
 ---
 
@@ -283,6 +323,17 @@ This framework does **not** distribute a modified copy of SONATA. No SONATA sour
 
 ---
 
+### Capytaine — GNU General Public License v3 (GPL-3.0)
+
+**Repository:** [github.com/capytaine/capytaine](https://github.com/capytaine/capytaine)  
+**License:** [GNU General Public License v3.0](https://github.com/capytaine/capytaine/blob/master/LICENSE)
+
+Capytaine is used in this project as a Python BEM solver for linear potential-flow radiation problems. It is installed separately by the user and called through the scripts in `FLUID/capytaine/`.
+
+**Compliance statement:** This framework does **not** redistribute Capytaine source code or binaries. Capytaine remains an optional external dependency for BEM preprocessing, and its license terms remain with the upstream project.
+
+---
+
 ### Summary
 
 | Software | License | Usage mode | Code included in this repo |
@@ -290,8 +341,9 @@ This framework does **not** distribute a modified copy of SONATA. No SONATA sour
 | **This framework (GINO)** | **Dual: GPL-3.0-or-later OR Commercial** | — | Yes |
 | PanelAero | BSD 3-Clause | `pip install` + called at runtime | No |
 | SONATA | GNU LGPL v3 | Cloned separately + called at runtime | No |
+| Capytaine | GNU GPL v3 | `pip install` + called at runtime | No |
 
-Both libraries are used in compliance with their respective licenses. Licensing of this framework itself is defined by the project dual-license terms in [`LICENSE`](LICENSE) and [`COMMERCIAL_LICENSE.md`](COMMERCIAL_LICENSE.md).
+These libraries are used in compliance with their respective licenses. Licensing of this framework itself is defined by the project dual-license terms in [`LICENSE`](LICENSE) and [`COMMERCIAL_LICENSE.md`](COMMERCIAL_LICENSE.md).
 
 ---
 

@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import os
+from typing import Optional
 
 
 def plot_combined_vgvf_params(results_dict, config, param_name, param_label, param_unit):
@@ -93,7 +94,7 @@ def plot_combined_vgvf_params(results_dict, config, param_name, param_label, par
     # V-g plot styling
     ax1.axhline(0.0, linestyle="--", linewidth=1, color='black', alpha=0.5)
     ax1.set_xlabel("Airspeed V [m/s]", fontsize=12)
-    ax1.set_ylabel("Damping g = -σ/ω [–]", fontsize=12)
+    ax1.set_ylabel("Damping g = σ/ω [–]", fontsize=12)
     case_name = config.name if config else "Flutter Analysis"
     ax1.set_title(f"{case_name} – V-g Diagram ({param_name} sweep)", fontsize=14, fontweight='bold')
     ax1.legend(fontsize=10, loc='best')
@@ -208,7 +209,7 @@ def plot_combined_vgvf_alpha(results_dict, config=None):
     # V-g plot styling
     ax1.axhline(0.0, linestyle="--", linewidth=1, color='black', alpha=0.5)
     ax1.set_xlabel("Airspeed V [m/s]", fontsize=12)
-    ax1.set_ylabel("Damping g = -σ/ω [–]", fontsize=12)
+    ax1.set_ylabel("Damping g = σ/ω [–]", fontsize=12)
     case_name = config.name if config else "Flutter Analysis"
     ax1.set_title(f"{case_name} – V-g Diagram (Multiple α)", fontsize=14, fontweight='bold')
     ax1.legend(fontsize=10, loc='best')
@@ -253,7 +254,165 @@ def plot_combined_vgvf_alpha(results_dict, config=None):
     plt.show()
 
 
-def plot_vg_vf(flutter_results, config=None, save_path="", show_plot=False):
+def _output_name_with_tag(basename: str, output_tag: Optional[str]) -> str:
+    """Insert ``_tag`` before the extension, e.g. ``vg_data_nlag4.csv``."""
+    if not output_tag:
+        return basename
+    stem, ext = os.path.splitext(basename)
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(output_tag))
+    return f"{stem}_{safe}{ext}"
+
+
+_MPS_TO_KNOTS = 1.94384
+
+
+def _vgvf_plot_axes(config):
+    """Return (v_knots, vf_hertz, v_label, omega_label, v_unit_short)."""
+    v_knots = bool(getattr(config, "v_knots", False))
+    vf_hertz = bool(getattr(config, "vf_hertz", False))
+    v_label = "Airspeed V [knots]" if v_knots else "Airspeed V [m/s]"
+    omega_label = "Frequency ω [Hz]" if vf_hertz else "Frequency ω [rad/s]"
+    v_unit_short = "kn" if v_knots else "m/s"
+    return v_knots, vf_hertz, v_label, omega_label, v_unit_short
+
+
+def _vgvf_velocity_for_plot(V_m_s, *, v_knots=False):
+    V_m_s = np.asarray(V_m_s, dtype=float)
+    return V_m_s * _MPS_TO_KNOTS if v_knots else V_m_s
+
+
+def _vgvf_frequency_for_plot(omega_rad_s, *, vf_hertz=False):
+    omega_rad_s = np.asarray(omega_rad_s, dtype=float)
+    return omega_rad_s / (2.0 * np.pi) if vf_hertz else omega_rad_s
+
+
+def _vgvf_scalar_velocity_for_plot(V_m_s, *, v_knots=False):
+    if V_m_s is None or not np.isfinite(V_m_s):
+        return None
+    return float(V_m_s) * _MPS_TO_KNOTS if v_knots else float(V_m_s)
+
+
+def plot_vg_lambda_vf_combined(
+    flutter_results,
+    config=None,
+    save_path="",
+    show_plot=False,
+    output_tag: Optional[str] = None,
+):
+    """
+    Abramson-style figure: V–Λ (log decrement), V–g, and V–f in one row.
+
+    Λ = 2π (σ/ω) from stored damping/frequency arrays (see ``log_decrement_from_storage``).
+    Works for any solver that fills ``FlutterResults`` (PK, Roger RFA, RFA+PK).
+    """
+    if config is None or not getattr(config, "plot_log_decrement_vg", False):
+        return
+
+    print("\n--- Generating V–Λ / V–g / V–f combined plot ---")
+
+    V_m_s = np.asarray(flutter_results.velocities, dtype=float)
+    g = np.asarray(flutter_results.damping, dtype=float)
+    omega_rad_s = np.asarray(flutter_results.frequencies, dtype=float)
+    Vf_m_s = flutter_results.flutter_speed
+
+    v_knots, vf_hertz, v_label, omega_label, v_unit_short = _vgvf_plot_axes(config)
+    V = _vgvf_velocity_for_plot(V_m_s, v_knots=v_knots)
+    omega = _vgvf_frequency_for_plot(omega_rad_s, vf_hertz=vf_hertz)
+    Vf_plot = _vgvf_scalar_velocity_for_plot(Vf_m_s, v_knots=v_knots)
+
+    dimless = bool(getattr(config, "dimensionless_vgvf_results", True))
+    Lambda = vgvf_plotting.log_decrement_from_storage(
+        g, omega_rad_s, dimensionless_vgvf_results=dimless
+    )
+
+    if not save_path and config and getattr(config, "save_plots", False):
+        save_path = config.output_dir
+    if save_path:
+        os.makedirs(save_path, exist_ok=True)
+
+    import pandas as pd
+
+    vlam_data = {"Velocity_m_s": V_m_s}
+    if v_knots:
+        vlam_data["Velocity_knots"] = V
+    for j in range(Lambda.shape[1]):
+        vlam_data[f"LogDecrement_Branch_{j + 1}"] = Lambda[:, j]
+    vlam_df = pd.DataFrame(vlam_data)
+    vlam_csv = (
+        os.path.join(save_path, _output_name_with_tag("vlambda_data.csv", output_tag))
+        if save_path
+        else _output_name_with_tag("vlambda_data.csv", output_tag)
+    )
+    vlam_df.to_csv(vlam_csv, index=False, float_format="%.6f")
+    print(f"V–Λ data saved to {vlam_csv}")
+
+    fig, (ax_lam, ax_g, ax_f) = plt.subplots(1, 3, figsize=(18, 5))
+
+    for j in range(Lambda.shape[1]):
+        ax_lam.plot(V, Lambda[:, j], label=f"Branch {j + 1}")
+    ax_lam.axhline(0.0, linestyle="--", linewidth=1, color="gray")
+
+    for j in range(g.shape[1]):
+        ax_g.plot(V, g[:, j], label=f"Branch {j + 1}")
+    ax_g.axhline(0.0, linestyle="--", linewidth=1, color="gray")
+
+    for j in range(omega.shape[1]):
+        ax_f.plot(V, omega[:, j], label=f"Branch {j + 1}")
+
+    Vf_list_plot = []
+    for j in range(g.shape[1]):
+        Vf_j_m_s, _ = vgvf_plotting.first_flutter_crossing(V_m_s, g[:, j])
+        Vf_j_plot = _vgvf_scalar_velocity_for_plot(Vf_j_m_s, v_knots=v_knots)
+        if Vf_j_plot is not None:
+            Vf_list_plot.append(Vf_j_plot)
+    if Vf_plot is not None:
+        Vf_line = Vf_plot
+    elif Vf_list_plot:
+        Vf_line = min(Vf_list_plot)
+    else:
+        Vf_line = None
+
+    if Vf_line is not None:
+        for ax in (ax_lam, ax_g, ax_f):
+            ax.axvline(Vf_line, linestyle="--", linewidth=1, color="red")
+        ax_lam.text(
+            Vf_line, ax_lam.get_ylim()[1] * 0.85, f"Vf ≈ {Vf_line:.1f} {v_unit_short}",
+            rotation=90, ha="right", va="center",
+        )
+
+    ax_lam.set_xlabel(v_label)
+    ax_lam.set_ylabel(r"Log decrement $\Lambda = 2\pi(\sigma/\omega)$ [–]")
+    ax_lam.set_title("Flutter – V–Λ")
+    ax_lam.legend()
+    ax_lam.grid(True, alpha=0.3)
+
+    ax_g.set_xlabel(v_label)
+    ax_g.set_ylabel("Damping g = σ/ω [–]")
+    ax_g.set_title("Flutter – V–g")
+    ax_g.legend()
+    ax_g.grid(True, alpha=0.3)
+
+    ax_f.set_xlabel(v_label)
+    ax_f.set_ylabel(omega_label)
+    ax_f.set_title("Flutter – V–f")
+    ax_f.legend()
+    ax_f.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    combined_name = _output_name_with_tag("vg_lambda_vf_combined.png", output_tag)
+    combined_outfile = os.path.join(save_path, combined_name) if save_path else combined_name
+    if combined_outfile:
+        plt.savefig(combined_outfile, dpi=150, bbox_inches="tight")
+        print(f"Combined V–Λ / V–g / V–f plot saved to {combined_outfile}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
+
+
+def plot_vg_vf(flutter_results, config=None, save_path="", show_plot=False, output_tag: Optional[str] = None):
     """
     Generates and saves the V-g and V-f plots as subplots in a single figure.
     Also exports the data to CSV files.
@@ -263,41 +422,65 @@ def plot_vg_vf(flutter_results, config=None, save_path="", show_plot=False):
         config: Configuration object (optional)
         save_path: Path for saving plots and data (optional)
         show_plot: If True, display plot; if False, only save PNG and CSV but don't show (default: False)
+        output_tag: If set, file basenames get ``_<tag>`` before the extension (for sweeps).
     """
     print("\n--- Generating V-g and V-f plots ---")
-    
-    V = flutter_results.velocities
-    g = flutter_results.damping
-    omega = flutter_results.frequencies
-    Vf = flutter_results.flutter_speed
-    
+
+    V_m_s = np.asarray(flutter_results.velocities, dtype=float)
+    g = np.asarray(flutter_results.damping, dtype=float)
+    omega_rad_s = np.asarray(flutter_results.frequencies, dtype=float)
+    Vf_m_s = flutter_results.flutter_speed
+
+    v_knots, vf_hertz, v_label, omega_label, v_unit_short = _vgvf_plot_axes(config)
+    V = _vgvf_velocity_for_plot(V_m_s, v_knots=v_knots)
+    omega = _vgvf_frequency_for_plot(omega_rad_s, vf_hertz=vf_hertz)
+    Vf_plot = _vgvf_scalar_velocity_for_plot(Vf_m_s, v_knots=v_knots)
+
     # Determine output directory - use provided save_path if available, otherwise use config
     if not save_path and config and config.save_plots:
         output_dir = config.output_dir
         os.makedirs(output_dir, exist_ok=True)
         save_path = output_dir
     
-    combined_outfile = os.path.join(save_path, "vg_vf_combined.png") if save_path else "vg_vf_combined.png"
+    combined_name = _output_name_with_tag("vg_vf_combined.png", output_tag)
+    combined_outfile = os.path.join(save_path, combined_name) if save_path else combined_name
     
     # Export data to CSV files
     import pandas as pd
     
-    # Prepare V-g data
-    vg_data = {'Velocity_m_s': V}
+    # CSV: always store SI; add display columns when non-default units are requested
+    vg_data = {'Velocity_m_s': V_m_s}
+    if v_knots:
+        vg_data['Velocity_knots'] = V
     for j in range(g.shape[1]):
         vg_data[f'Damping_Branch_{j+1}'] = g[:, j]
     vg_df = pd.DataFrame(vg_data)
-    
-    # Prepare V-f data
-    vf_data = {'Velocity_m_s': V}
-    for j in range(omega.shape[1]):
-        vf_data[f'Frequency_rad_s_Branch_{j+1}'] = omega[:, j]
+
+    vf_data = {'Velocity_m_s': V_m_s}
+    if v_knots:
+        vf_data['Velocity_knots'] = V
+    for j in range(omega_rad_s.shape[1]):
+        vf_data[f'Frequency_rad_s_Branch_{j+1}'] = omega_rad_s[:, j]
+        if vf_hertz:
+            vf_data[f'Frequency_Hz_Branch_{j+1}'] = omega[:, j]
     vf_df = pd.DataFrame(vf_data)
     
     # Save CSV files
-    vg_csv      = os.path.join(save_path, "vg_data.csv")      if save_path else "vg_data.csv"
-    vf_csv      = os.path.join(save_path, "vf_data.csv")      if save_path else "vf_data.csv"
-    summary_csv = os.path.join(save_path, "flutter_summary.csv") if save_path else "flutter_summary.csv"
+    vg_csv = (
+        os.path.join(save_path, _output_name_with_tag("vg_data.csv", output_tag))
+        if save_path
+        else _output_name_with_tag("vg_data.csv", output_tag)
+    )
+    vf_csv = (
+        os.path.join(save_path, _output_name_with_tag("vf_data.csv", output_tag))
+        if save_path
+        else _output_name_with_tag("vf_data.csv", output_tag)
+    )
+    summary_csv = (
+        os.path.join(save_path, _output_name_with_tag("flutter_summary.csv", output_tag))
+        if save_path
+        else _output_name_with_tag("flutter_summary.csv", output_tag)
+    )
     
     vg_df.to_csv(vg_csv, index=False, float_format='%.6f')
     vf_df.to_csv(vf_csv, index=False, float_format='%.6f')
@@ -305,16 +488,33 @@ def plot_vg_vf(flutter_results, config=None, save_path="", show_plot=False):
     print(f"V-g data saved to {vg_csv}")
     print(f"V-f data saved to {vf_csv}")
     
-    # Create flutter summary with critical speeds for each branch
-    flutter_summary = {'Branch': [], 'Flutter_Speed_m_s': [], 'Flutter_Frequency_rad_s': []}
+    # Flutter summary in SI (crossings computed on m/s velocities)
+    flutter_summary = {
+        'Branch': [],
+        'Flutter_Speed_m_s': [],
+        'Flutter_Frequency_rad_s': [],
+    }
+    if v_knots:
+        flutter_summary['Flutter_Speed_knots'] = []
+    if vf_hertz:
+        flutter_summary['Flutter_Frequency_Hz'] = []
     for j in range(g.shape[1]):
-        Vf_j, idx = vgvf_plotting.first_flutter_crossing(V, g[:, j])
-        flutter_summary['Branch'].append(j+1)
-        flutter_summary['Flutter_Speed_m_s'].append(Vf_j if Vf_j is not None else np.nan)
-        if Vf_j is not None and idx is not None:
-            flutter_summary['Flutter_Frequency_rad_s'].append(omega[idx, j])
+        Vf_j_m_s, idx = vgvf_plotting.first_flutter_crossing(V_m_s, g[:, j])
+        flutter_summary['Branch'].append(j + 1)
+        flutter_summary['Flutter_Speed_m_s'].append(Vf_j_m_s if Vf_j_m_s is not None else np.nan)
+        if v_knots:
+            flutter_summary['Flutter_Speed_knots'].append(
+                _vgvf_scalar_velocity_for_plot(Vf_j_m_s, v_knots=True)
+                if Vf_j_m_s is not None else np.nan
+            )
+        if Vf_j_m_s is not None and idx is not None:
+            flutter_summary['Flutter_Frequency_rad_s'].append(float(omega_rad_s[idx, j]))
+            if vf_hertz:
+                flutter_summary['Flutter_Frequency_Hz'].append(float(omega[idx, j]))
         else:
             flutter_summary['Flutter_Frequency_rad_s'].append(np.nan)
+            if vf_hertz:
+                flutter_summary['Flutter_Frequency_Hz'].append(np.nan)
     
     summary_df = pd.DataFrame(flutter_summary)
     summary_df.to_csv(summary_csv, index=False, float_format='%.6f')
@@ -328,20 +528,28 @@ def plot_vg_vf(flutter_results, config=None, save_path="", show_plot=False):
         ax1.plot(V, g[:, j], label=f"Branch {j+1}")
     ax1.axhline(0.0, linestyle="--", linewidth=1, color='gray')
     
-    # Annotate flutter speed on V-g plot
-    Vf_list = []
+    # Annotate flutter speed on V-g plot (same display units as x-axis)
+    Vf_list_plot = []
     for j in range(g.shape[1]):
-        Vf_j, _ = vgvf_plotting.first_flutter_crossing(V, g[:, j])
-        if Vf_j is not None:
-            Vf_list.append(Vf_j)
-    if Vf_list:
-        Vf_min = min(Vf_list)
-        ax1.axvline(Vf_min, linestyle="--", linewidth=1, color='red')
-        ax1.text(Vf_min, ax1.get_ylim()[1]*0.85, f"Vf ≈ {Vf_min:.1f} m/s", 
-                rotation=90, ha="right", va="center")
-    
-    ax1.set_xlabel("Airspeed V [m/s]")
-    ax1.set_ylabel("Damping g = -σ/ω [–]")
+        Vf_j_m_s, _ = vgvf_plotting.first_flutter_crossing(V_m_s, g[:, j])
+        Vf_j_plot = _vgvf_scalar_velocity_for_plot(Vf_j_m_s, v_knots=v_knots)
+        if Vf_j_plot is not None:
+            Vf_list_plot.append(Vf_j_plot)
+    if Vf_plot is not None:
+        Vf_line = Vf_plot
+    elif Vf_list_plot:
+        Vf_line = min(Vf_list_plot)
+    else:
+        Vf_line = None
+    if Vf_line is not None:
+        ax1.axvline(Vf_line, linestyle="--", linewidth=1, color='red')
+        ax1.text(
+            Vf_line, ax1.get_ylim()[1] * 0.85, f"Vf ≈ {Vf_line:.1f} {v_unit_short}",
+            rotation=90, ha="right", va="center",
+        )
+
+    ax1.set_xlabel(v_label)
+    ax1.set_ylabel("Damping g = σ/ω [–]")
     ax1.set_title("Flutter Analysis – V-g")
     ax1.legend()
     ax1.grid(True, alpha=0.3)
@@ -349,13 +557,15 @@ def plot_vg_vf(flutter_results, config=None, save_path="", show_plot=False):
     # Plot V-f (right subplot)
     for j in range(omega.shape[1]):
         ax2.plot(V, omega[:, j], label=f"Branch {j+1}")
-    if Vf is not None:
-        ax2.axvline(Vf, linestyle="--", linewidth=1, color='red')
-        ax2.text(Vf, ax2.get_ylim()[1]*0.85, f"Vf ≈ {Vf:.1f} m/s", 
-                rotation=90, ha="right", va="center")
-    
-    ax2.set_xlabel("Airspeed V [m/s]")
-    ax2.set_ylabel("Frequency ω [rad/s]")
+    if Vf_line is not None:
+        ax2.axvline(Vf_line, linestyle="--", linewidth=1, color='red')
+        ax2.text(
+            Vf_line, ax2.get_ylim()[1] * 0.85, f"Vf ≈ {Vf_line:.1f} {v_unit_short}",
+            rotation=90, ha="right", va="center",
+        )
+
+    ax2.set_xlabel(v_label)
+    ax2.set_ylabel(omega_label)
     ax2.set_title("Flutter Analysis – V-f")
     ax2.legend()
     ax2.grid(True, alpha=0.3)
@@ -370,6 +580,14 @@ def plot_vg_vf(flutter_results, config=None, save_path="", show_plot=False):
         plt.show()
     else:
         plt.close()  # Close the figure to free memory
+
+    plot_vg_lambda_vf_combined(
+        flutter_results,
+        config=config,
+        save_path=save_path,
+        show_plot=show_plot,
+        output_tag=output_tag,
+    )
 
 
 def plot_qmodal_entries_at_convergence(config, structural_results, coupling_results, flutter_results,
@@ -794,6 +1012,225 @@ def plot_eigenvalue_trajectory(flutter_results, results_raw, config=None, save_p
         plt.show()
 
 
+def _dedupe_pk_results_by_velocity(raw_results):
+    """Keep the last PK snapshot per airspeed (resting-fluid step may repeat V)."""
+    by_v = {}
+    for entry in raw_results:
+        by_v[float(entry["V"])] = entry
+    return [by_v[v] for v in sorted(by_v)]
+
+
+def _wet_spectrum_from_velocity_entry(entry, omega_n, freq_margin):
+    """Return classified wet spectrum for one velocity step."""
+    if entry.get("wet_spectrum") is not None:
+        return entry["wet_spectrum"]
+
+    from . import pk_method
+
+    primary_mode = 0
+    modes_list = entry.get("modes", [])
+    if modes_list:
+        primary_mode = int(modes_list[0].get("mode", 0))
+
+    for md in modes_list:
+        if md.get("mode") != primary_mode or not md.get("converged", False):
+            continue
+        wet_vals = md.get("wet_vals_all")
+        if wet_vals is None:
+            wet_vals = md.get("wet_evals_first3")
+        if wet_vals is None:
+            continue
+        return pk_method.build_wet_spectrum_summary(
+            wet_vals, omega_n, modes_list, freq_margin
+        )
+    return None
+
+
+def plot_pk_converged_wet_eigenvectors(flutter_results, config=None, save_path="", show_plot=False):
+    """
+    Plot wet roots that the PK loop does not track (orphan / untracked branches).
+
+    At each airspeed, the full sorted wet spectrum is taken from the converged state
+    of structural mode 0. Roots already matched to a converged PK branch are excluded;
+    the remaining roots (typically the lowest-frequency one at low speed) are plotted
+    as ω(V) and g(V) trends alongside the PK-tracked branches for reference.
+    """
+    print("\n--- Generating PK Untracked Wet-Root Trend Plot ---")
+
+    if config is not None and not getattr(config, "plot_pk_wet_eigenvectors", False):
+        print("PK untracked-root plot disabled (plot_pk_wet_eigenvectors=False).")
+        return
+
+    raw_results = getattr(flutter_results, "raw_results", None)
+    if not raw_results:
+        print("No raw PK results available for untracked-root plot.")
+        return
+
+    if config and getattr(config, "save_plots", False):
+        output_dir = config.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        save_path = output_dir
+
+    freq_margin = float(
+        getattr(config, "rfa_freq_margin", None)
+        or getattr(config, "pk_freq_margin", 0.15)
+    )
+    omega_n = np.array([], dtype=float)
+
+    entries = _dedupe_pk_results_by_velocity(raw_results)
+    spectra = []
+    for entry in entries:
+        spec = _wet_spectrum_from_velocity_entry(entry, omega_n, freq_margin)
+        if spec is not None:
+            spectra.append((float(entry["V"]), spec))
+            if omega_n.size == 0 and spec.get("omega_structural"):
+                omega_n = np.asarray(spec["omega_structural"], dtype=float)
+                if spec.get("freq_margin") is not None:
+                    freq_margin = float(spec["freq_margin"])
+
+    if not spectra:
+        print("No wet-spectrum snapshots found (re-run analysis with updated pk_method).")
+        return
+
+    fig, (ax_omega, ax_g) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+    # PK-tracked branches (from flutter_results arrays)
+    V_pk = np.asarray(flutter_results.velocities, dtype=float)
+    omega_pk = np.asarray(flutter_results.frequencies, dtype=float)
+    g_pk = np.asarray(flutter_results.damping, dtype=float)
+    for j in range(omega_pk.shape[1] if omega_pk.ndim > 1 else 1):
+        om_col = omega_pk[:, j] if omega_pk.ndim > 1 else omega_pk
+        g_col = g_pk[:, j] if g_pk.ndim > 1 else g_pk
+        ax_omega.plot(V_pk, om_col, "--", linewidth=1.2, alpha=0.7, label=f"PK branch {j + 1}")
+        ax_g.plot(V_pk, g_col, "--", linewidth=1.2, alpha=0.7, label=f"PK branch {j + 1}")
+
+    if omega_n.size > 0:
+        for si, om_s in enumerate(omega_n):
+            ax_omega.axhline(
+                float(om_s),
+                color="gray",
+                linestyle=":",
+                linewidth=0.9,
+                alpha=0.6,
+                label=f"dry ω_{si}" if si < 2 else None,
+            )
+
+    V_orphan, om_orphan, g_orphan = [], [], []
+    csv_rows = []
+    untracked_branches = {}
+
+    for V, spec in spectra:
+        lowest = spec.get("lowest_untracked")
+        if lowest is not None:
+            V_orphan.append(V)
+            om_orphan.append(lowest["omega"])
+            g_orphan.append(lowest["gamma"])
+
+        for r in spec.get("untracked", []):
+            key = int(r["index"])
+            untracked_branches.setdefault(key, {"V": [], "omega": [], "gamma": []})
+            untracked_branches[key]["V"].append(V)
+            untracked_branches[key]["omega"].append(r["omega"])
+            untracked_branches[key]["gamma"].append(r["gamma"])
+
+        for r in spec.get("roots", []):
+            csv_rows.append(
+                {
+                    "Velocity_m_s": V,
+                    "spectrum_index": r["index"],
+                    "kind": r["kind"],
+                    "omega_rad_s": r["omega"],
+                    "gamma": r["gamma"],
+                    "sigma_rad_s": r["sigma"],
+                    "lambda_re": float(np.real(r["p"])),
+                    "lambda_im": float(np.imag(r["p"])),
+                    "structural_near_mode": r["structural_near_mode"],
+                    "is_lowest_untracked": bool(
+                        lowest is not None and r["index"] == lowest["index"]
+                    ),
+                }
+            )
+
+    if V_orphan:
+        ax_omega.plot(
+            V_orphan,
+            om_orphan,
+            "o-",
+            color="crimson",
+            linewidth=2.2,
+            markersize=4,
+            label="lowest untracked root",
+            zorder=5,
+        )
+        ax_g.plot(
+            V_orphan,
+            g_orphan,
+            "o-",
+            color="crimson",
+            linewidth=2.2,
+            markersize=4,
+            label="lowest untracked root",
+            zorder=5,
+        )
+
+    cmap = plt.cm.plasma
+    for bi, (idx, data) in enumerate(sorted(untracked_branches.items())):
+        if len(data["V"]) == 0:
+            continue
+        color = cmap(0.2 + 0.6 * bi / max(len(untracked_branches), 1))
+        ax_omega.plot(
+            data["V"],
+            data["omega"],
+            "s--",
+            color=color,
+            linewidth=1.0,
+            markersize=3,
+            alpha=0.85,
+            label=f"untracked idx {idx}",
+        )
+        ax_g.plot(
+            data["V"],
+            data["gamma"],
+            "s--",
+            color=color,
+            linewidth=1.0,
+            markersize=3,
+            alpha=0.85,
+        )
+
+    ax_g.axhline(0.0, color="black", linestyle="--", linewidth=0.8, alpha=0.5)
+    ax_omega.set_ylabel(r"$\omega = |\mathrm{Im}(\lambda)|$ [rad/s]")
+    ax_g.set_ylabel(r"$g = \sigma/\omega$ [–]")
+    ax_g.set_xlabel("Airspeed V [m/s]")
+    ax_omega.legend(fontsize=8, loc="best", ncol=2)
+    ax_g.legend(fontsize=8, loc="best", ncol=2)
+    ax_omega.grid(True, alpha=0.3)
+    ax_g.grid(True, alpha=0.3)
+
+    case_name = config.name if config and hasattr(config, "name") else "Flutter Analysis"
+    fig.suptitle(
+        f"{case_name} — untracked wet roots (not selected by PK mode matching)",
+        fontsize=14,
+        fontweight="bold",
+    )
+    plt.tight_layout()
+
+    outfile = os.path.join(save_path, "pk_untracked_wet_roots.png") if save_path else "pk_untracked_wet_roots.png"
+    plt.savefig(outfile, dpi=150, bbox_inches="tight")
+    print(f"PK untracked-root plot saved to {outfile}")
+
+    if csv_rows:
+        import pandas as pd
+
+        csv_path = os.path.join(save_path, "pk_untracked_wet_roots.csv") if save_path else "pk_untracked_wet_roots.csv"
+        pd.DataFrame(csv_rows).to_csv(csv_path, index=False, float_format="%.6e")
+        print(f"PK untracked-root data saved to {csv_path}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
+
 
 def plot_cp_at_velocities(config, aerogrid, results):
 
@@ -872,7 +1309,6 @@ def plot_cp_at_fixed_k_values(config, aerogrid, results, k_values=[0.001, 0.5, 1
         output_dir = config.output_dir
         os.makedirs(output_dir, exist_ok=True)
     
-    b = config.chord / 2
     c_sound = config.c_sound[config.fluid]
     
     # Find how many modes we're tracking (excluding lost modes)
@@ -897,7 +1333,7 @@ def plot_cp_at_fixed_k_values(config, aerogrid, results, k_values=[0.001, 0.5, 1
         # Use a reference velocity to compute Ma (use first non-zero velocity)
         V_ref = results[1]['V'] if len(results) > 1 else results[0]['V']
         Ma_dlm = V_ref / c_sound
-        k_dlm = k / b
+        k_dlm = k
         
         # Get Qjj at this k and Mach number
         try:
@@ -1249,145 +1685,203 @@ def plot_aero_beam_model(aerogrid, beam_model, config=None):
     plt.show()
 
 
-def plot_stiffness_damping_contributions(pk_solver, config=None, save_path="", show_plot=False):
+def plot_stiffness_damping_contributions(
+    pk_solver=None,
+    config=None,
+    save_path="",
+    show_plot=False,
+    flutter_results=None,
+):
     """
     Plot the structural and aerodynamic contributions to stiffness and damping
     at each converged velocity step.
-    
+
+    Data source (first match):
+      - ``pk_solver.contributions_history`` (PK or RFA-PK via SimpleNamespace)
+      - ``flutter_results.dlm_participants_history`` with K_struct / C_aero keys
+
     Args:
-        pk_solver: PKSolverV3 instance with contributions_history populated
+        pk_solver: PKSolverV3 or namespace with ``contributions_history``
         config: Configuration object (optional)
         save_path: Path for saving plots (optional)
         show_plot: If True, display plot; if False, only save CSV and PNG but don't show (default: False)
+        flutter_results: optional FlutterResults fallback for RFA history
     """
     print("\n--- Generating Stiffness and Damping Contributions Plot ---")
-    
-    contributions = pk_solver.contributions_history
-    
-    # Determine output directory - use provided save_path if available, otherwise use config
-    if not save_path and config and getattr(config, 'save_plots', False):
-        output_dir = config.output_dir
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = output_dir
+
+    contributions = None
+    if pk_solver is not None and getattr(pk_solver, "contributions_history", None):
+        contributions = pk_solver.contributions_history
+    if (not contributions) and flutter_results is not None:
+        hist = getattr(flutter_results, "dlm_participants_history", None)
+        if hist and isinstance(hist[0], dict) and "K_struct" in hist[0]:
+            contributions = hist
+
+    if not contributions:
+        print(
+            "  Skipped: no contributions history "
+            "(enable plot_stiffness_damping_contributions for Roger RFA / RFA-PK)."
+        )
+        return
+
+    # Determine output directory
+    if not save_path:
+        if config and getattr(config, "output_dir", None):
+            save_path = config.output_dir
+        elif config and getattr(config, "save_plots", False):
+            save_path = config.output_dir
+        else:
+            save_path = "output_data"
+        os.makedirs(save_path, exist_ok=True)
     
     # Extract data - check if matrices or scalars
     velocities = [c['V'] for c in contributions]
     
-    # Helper function to extract matrix entries (handles list of matrices)
-    def extract_entry(contrib_list, key, i, j):
-        """Extract entry [i,j] from a matrix or list of matrices, averaging if needed"""
+    # Helper: per-velocity list of 2×2 matrices (one per converged structural slot).
+    def extract_entry(contrib_list, key, i, j, mode_slot=None, default=0.0):
+        """
+        Extract [i,j] from contribution matrices at each velocity.
+
+        When ``mode_slot`` is set (0 or 1), use the matrix stored at the end of that
+        mode's PK solve (Q_modal evaluated at that mode's converged k, p). When None,
+        average across slots (legacy behaviour).
+        """
         values = []
         for c in contrib_list:
+            if key not in c:
+                values.append(float(default))
+                continue
             matrices = c[key]
             if isinstance(matrices, list):
-                # Average across all modes for this velocity
-                if len(matrices) > 0:
-                    avg_value = np.mean([mat[i, j] for mat in matrices])
-                    values.append(avg_value)
+                if mode_slot is not None and mode_slot < len(matrices):
+                    values.append(float(matrices[mode_slot][i, j]))
+                elif len(matrices) > 0:
+                    values.append(float(np.mean([mat[i, j] for mat in matrices])))
+                else:
+                    values.append(float(default))
             else:
-                # Single matrix
-                values.append(matrices[i, j])
+                values.append(float(matrices[i, j]))
         return values
-    
-    # Extract diagonal and off-diagonal entries from matrices
-    M_struct_00 = extract_entry(contributions, 'M_struct', 0, 0)
-    M_struct_11 = extract_entry(contributions, 'M_struct', 1, 1)
-    M_struct_01 = extract_entry(contributions, 'M_struct', 0, 1)
-    M_struct_10 = extract_entry(contributions, 'M_struct', 1, 0)
-    K_struct_00 = extract_entry(contributions, 'K_struct', 0, 0)
-    K_struct_11 = extract_entry(contributions, 'K_struct', 1, 1)
-    K_struct_01 = extract_entry(contributions, 'K_struct', 0, 1)
-    K_struct_10 = extract_entry(contributions, 'K_struct', 1, 0)
-    K_aero_00 = extract_entry(contributions, 'K_aero', 0, 0)
-    K_aero_11 = extract_entry(contributions, 'K_aero', 1, 1)
-    K_aero_01 = extract_entry(contributions, 'K_aero', 0, 1)
-    K_aero_10 = extract_entry(contributions, 'K_aero', 1, 0)
-    K_effective_00 = extract_entry(contributions, 'K_effective', 0, 0)
-    K_effective_11 = extract_entry(contributions, 'K_effective', 1, 1)
-    K_effective_01 = extract_entry(contributions, 'K_effective', 0, 1)
-    K_effective_10 = extract_entry(contributions, 'K_effective', 1, 0)
-    C_struct_00 = extract_entry(contributions, 'C_struct', 0, 0)
-    C_struct_11 = extract_entry(contributions, 'C_struct', 1, 1)
-    C_struct_01 = extract_entry(contributions, 'C_struct', 0, 1)
-    C_struct_10 = extract_entry(contributions, 'C_struct', 1, 0)
-    C_aero_00 = extract_entry(contributions, 'C_aero', 0, 0)
-    C_aero_11 = extract_entry(contributions, 'C_aero', 1, 1)
-    C_aero_01 = extract_entry(contributions, 'C_aero', 0, 1)
-    C_aero_10 = extract_entry(contributions, 'C_aero', 1, 0)
-    C_effective_00 = extract_entry(contributions, 'C_effective', 0, 0)
-    C_effective_11 = extract_entry(contributions, 'C_effective', 1, 1)
-    C_effective_01 = extract_entry(contributions, 'C_effective', 0, 1)
-    C_effective_10 = extract_entry(contributions, 'C_effective', 1, 0)
+
+    matrix_components = {
+        'M': [
+            ('structural', 'M_struct', '+'),
+            ('aerodynamic_B2', 'M_aero', '-'),
+            ('hydro_Capytaine', 'M_hydro', '+'),
+            ('effective', 'M_effective', '='),
+        ],
+        'K': [
+            ('structural', 'K_struct', '+'),
+            ('aerodynamic_B0', 'K_aero', '-'),
+            ('hydro', 'K_hydro', '+'),
+            ('effective', 'K_effective', '='),
+        ],
+        'C': [
+            ('structural', 'C_struct', '+'),
+            ('aerodynamic_B1', 'C_aero', '-'),
+            ('hydro_Capytaine', 'C_hydro', '+'),
+            ('empirical', 'C_empirical', '+'),
+            ('effective', 'C_effective', '='),
+        ],
+    }
+
+    entry_indices = [(0, 0), (1, 1), (0, 1), (1, 0)]
+    data = {}
+    for family, specs in matrix_components.items():
+        data[family] = {}
+        for label, key, _sign in specs:
+            data[family][label] = {}
+            for i, j in entry_indices:
+                mode_slot = i if i == j else i
+                data[family][label][(i, j)] = extract_entry(
+                    contributions, key, i, j, mode_slot=mode_slot
+                )
+
+    def balance_residual(family, entry):
+        """Check that effective equals structural - aero + hydro/empirical terms."""
+        effective = np.asarray(data[family]['effective'][entry], dtype=float)
+        rhs = np.zeros_like(effective)
+        for label, _key, sign in matrix_components[family]:
+            if sign == '=':
+                continue
+            arr = np.asarray(data[family][label][entry], dtype=float)
+            rhs = rhs - arr if sign == '-' else rhs + arr
+        return effective - rhs
     
     # Export to CSV
     import pandas as pd
     
-    # Export diagonal entries
-    contrib_df = pd.DataFrame({
-        'Velocity_m_s': velocities,
-        'M_structural_00': M_struct_00,
-        'M_structural_11': M_struct_11,
-        'M_structural_01': M_struct_01,
-        'M_structural_10': M_struct_10, 
-        'K_structural_00': K_struct_00,
-        'K_structural_11': K_struct_11,
-        'K_structural_01': K_struct_01,
-        'K_structural_10': K_struct_10,
-        'K_aerodynamic_00': K_aero_00,
-        'K_aerodynamic_11': K_aero_11,
-        'K_aerodynamic_01': K_aero_01,
-        'K_aerodynamic_10': K_aero_10,
-        'K_effective_00': K_effective_00,
-        'K_effective_11': K_effective_11,
-        'K_effective_01': K_effective_01,
-        'K_effective_10': K_effective_10,
-        'C_structural_00': C_struct_00,
-        'C_structural_11': C_struct_11,
-        'C_structural_01': C_struct_01,
-        'C_structural_10': C_struct_10,
-        'C_aerodynamic_00': C_aero_00,
-        'C_aerodynamic_11': C_aero_11,
-        'C_aerodynamic_01': C_aero_01,
-        'C_aerodynamic_10': C_aero_10,
-        'C_effective_00': C_effective_00,
-        'C_effective_11': C_effective_11,
-        'C_effective_01': C_effective_01,
-        'C_effective_10': C_effective_10
-    })
+    csv_cols = {'Velocity_m_s': velocities}
+    for family, specs in matrix_components.items():
+        for label, _key, _sign in specs:
+            for i, j in entry_indices:
+                csv_cols[f'{family}_{label}_{i}{j}'] = data[family][label][(i, j)]
+        for i, j in entry_indices:
+            csv_cols[f'{family}_balance_residual_{i}{j}'] = balance_residual(family, (i, j))
+    contrib_df = pd.DataFrame(csv_cols)
     
     contrib_csv = os.path.join(save_path, "stiffness_damping_contributions.csv") if save_path else "stiffness_damping_contributions.csv"
     contrib_df.to_csv(contrib_csv, index=False, float_format='%.6e')
     print(f"Contributions data saved to {contrib_csv}")
     
-    # Create figure with two subplots (stiffness and damping)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 5))
-    
-    # Plot diagonal entries separately for each mode
-    # Plot stiffness contributions
-    ax1.plot(velocities, K_struct_00, 'b-o', label='Structural K[0,0] (Mode 0)', linewidth=1, markersize=2)
-    ax1.plot(velocities, K_struct_11, 'b--s', label='Structural K[1,1] (Mode 1)', linewidth=1, markersize=2)
-    ax1.plot(velocities, K_aero_00, 'r-o', label='Aerodynamic K[0,0] (Mode 0)', linewidth=1, markersize=2)
-    #ax1.plot(velocities, K_aero_11, 'r--s', label='Aerodynamic K[1,1] (Mode 1)', linewidth=1, markersize=1)
-    ax1.set_xlabel('Airspeed V [m/s]', fontsize=12)
-    ax1.set_ylabel('Stiffness Diagonal Entries [N/m or N⋅m/rad]', fontsize=12)
-    ax1.set_title('Stiffness Contributions (Diagonal) vs Velocity', fontsize=14, fontweight='bold')
-    ax1.legend(fontsize=9)
-    ax1.grid(True, alpha=0.3)
-    ax1.set_yscale('log')
-    
-    # Plot damping contributions
-    ax2.plot(velocities, C_struct_00, 'b-o', label='Structural C[0,0] (Mode 0)', linewidth=1, markersize=2)
-    ax2.plot(velocities, C_struct_11, 'b--s', label='Structural C[1,1] (Mode 1)', linewidth=1, markersize=2)
-    ax2.plot(velocities, C_aero_00, 'r-o', label='Aerodynamic C[0,0] (Mode 0)', linewidth=1, markersize=2)
-    ax2.plot(velocities, C_aero_11, 'r--s', label='Aerodynamic C[1,1] (Mode 1)', linewidth=1, markersize=2)
-    ax2.plot(velocities, C_effective_00, 'g-o', label='Effective C[0,0] (Mode 0)', linewidth=1, markersize=2)
-    ax2.plot(velocities, C_effective_11, 'g--s', label='Effective C[1,1] (Mode 1)', linewidth=1, markersize=2)
-    ax2.set_xlabel('Airspeed V [m/s]', fontsize=12)
-    ax2.set_ylabel('Damping Diagonal Entries [N⋅s/m or N⋅m⋅s/rad]', fontsize=12)
-    ax2.set_title('Damping Contributions (Diagonal) vs Velocity', fontsize=14, fontweight='bold')
-    ax2.legend(fontsize=9)
-    ax2.grid(True, alpha=0.3)
-    ax2.set_yscale('log')
+    # Display velocity (optional knots)
+    v_knots = bool(getattr(config, "v_knots", False)) if config else False
+    V_plot = _vgvf_velocity_for_plot(np.asarray(velocities, dtype=float), v_knots=v_knots)
+    v_xlabel = "Airspeed V [knots]" if v_knots else "Airspeed V [m/s]"
+
+    # Create figure with M, K and C system-matrix contributions.
+    fig, axes = plt.subplots(1, 3, figsize=(22, 5))
+    component_style = {
+        'structural': ('#1f77b4', 'Structural'),
+        'aerodynamic_B2': ('#d62728', 'Aero B2 (subtracted)'),
+        'aerodynamic_B0': ('#d62728', 'Aero B0 (subtracted)'),
+        'aerodynamic_B1': ('#d62728', 'Aero B1 (subtracted)'),
+        'hydro_Capytaine': ('#9467bd', 'Hydro/Capytaine (added)'),
+        'hydro': ('#9467bd', 'Hydro (added)'),
+        'empirical': ('#8c564b', 'Empirical (added)'),
+        'effective': ('#2ca02c', 'Effective'),
+    }
+    mode_style = {0: ('-', 'o'), 1: ('--', 's')}
+
+    def _plot_family(ax, family, title, ylabel):
+        for label, _key, _sign in matrix_components[family]:
+            color, label_text = component_style.get(label, ('#7f7f7f', label))
+            for mode in (0, 1):
+                entry = (mode, mode)
+                if entry not in data[family][label]:
+                    continue
+                linestyle, marker = mode_style.get(mode, ('-', 'o'))
+                series = data[family][label][entry]
+                ax.plot(
+                    V_plot, series,
+                    color=color, linestyle=linestyle, marker=marker,
+                    linewidth=1.1, markersize=2,
+                    label=f'{label_text} {family}[{mode},{mode}]'
+                )
+        ax.set_xlabel(v_xlabel, fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=12)
+        ax.set_title(title, fontsize=13, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=7)
+
+    _plot_family(
+        axes[0],
+        'M',
+        'Mass contributions: M_eff = M_struct - M_aero + M_hydro',
+        'Mass diagonal [modal units]',
+    )
+    _plot_family(
+        axes[1],
+        'K',
+        'Stiffness contributions: K_eff = K_struct - K_aero',
+        'Stiffness diagonal [modal units]',
+    )
+    _plot_family(
+        axes[2],
+        'C',
+        'Damping contributions: C_eff = C_struct - C_aero + C_hydro + C_emp',
+        'Damping diagonal [modal units]',
+    )
     
     plt.tight_layout()
     
@@ -1400,8 +1894,89 @@ def plot_stiffness_damping_contributions(pk_solver, config=None, save_path="", s
         plt.show()
     else:
         plt.close()  # Close the figure to free memory
-    
 
+
+def plot_DLM_participants(flutter_results, config=None, save_path="", show_plot=False):
+    """
+    Plot modal C_hat, K_hat (structural) and C_eff, K_eff (DLM-augmented) vs velocity.
+
+    Data are collected during the Roger RFA sweep in ``_build_A_aug`` when
+    ``config.plot_DLM_participants`` is True.
+    """
+    history = getattr(flutter_results, 'dlm_participants_history', None)
+    if not history:
+        print("\nNote: DLM participants plot skipped (no history; enable plot_DLM_participants for Roger RFA).")
+        return
+
+    print("\n--- Generating DLM participants plot (C_hat, K_hat, C_eff, K_eff vs V) ---")
+
+    if not save_path and config and getattr(config, 'save_plots', False):
+        output_dir = os.path.join(config.output_dir, getattr(config, 'name', ''))
+        os.makedirs(output_dir, exist_ok=True)
+        save_path = output_dir
+    elif not save_path:
+        save_path = "output_data"
+        os.makedirs(save_path, exist_ok=True)
+
+    velocities = [step['V'] for step in history]
+    n_modes = history[0]['C_hat'].shape[0]
+
+    def _entry_series(key, i, j):
+        return [float(step[key][i, j]) for step in history]
+
+    import pandas as pd
+
+    csv_cols = {'Velocity_m_s': velocities}
+    for key in ('C_hat', 'K_hat', 'C_eff', 'K_eff'):
+        for i in range(n_modes):
+            csv_cols[f'{key}_{i}{i}'] = _entry_series(key, i, i)
+    contrib_df = pd.DataFrame(csv_cols)
+    case_tag = getattr(config, 'name', 'case') if config else 'case'
+    contrib_csv = os.path.join(save_path, f"{case_tag}_DLM_participants.csv")
+    contrib_df.to_csv(contrib_csv, index=False, float_format='%.6e')
+    print(f"DLM participants data saved to {contrib_csv}")
+
+    fig, (ax_k, ax_c) = plt.subplots(1, 2, figsize=(14, 5))
+    linestyles_hat = ['-', '--']
+    linestyles_eff = ['-', '--']
+
+    for i in range(min(n_modes, 2)):
+        ls_hat = linestyles_hat[i % len(linestyles_hat)]
+        ls_eff = linestyles_eff[i % len(linestyles_eff)]
+        ax_k.plot(velocities, _entry_series('K_hat', i, i),
+                  color='C0', linestyle=ls_hat, linewidth=1.5,
+                  label=f'K_hat[{i},{i}] (structural)')
+        ax_k.plot(velocities, _entry_series('K_eff', i, i),
+                  color='C1', linestyle=ls_eff, linewidth=1.5,
+                  label=f'K_eff[{i},{i}] (DLM)')
+        ax_c.plot(velocities, _entry_series('C_hat', i, i),
+                  color='C0', linestyle=ls_hat, linewidth=1.5,
+                  label=f'C_hat[{i},{i}] (structural)')
+        ax_c.plot(velocities, _entry_series('C_eff', i, i),
+                  color='C1', linestyle=ls_eff, linewidth=1.5,
+                  label=f'C_eff[{i},{i}] (DLM)')
+
+    ax_k.set_xlabel('Velocity V [m/s]')
+    ax_k.set_ylabel('Stiffness diagonal [modal units]')
+    ax_k.set_title('Modal stiffness: structural vs effective (DLM)')
+    ax_k.legend(fontsize=9)
+    ax_k.grid(True, alpha=0.3)
+
+    ax_c.set_xlabel('Velocity V [m/s]')
+    ax_c.set_ylabel('Damping diagonal [modal units]')
+    ax_c.set_title('Modal damping: structural vs effective (DLM)')
+    ax_c.legend(fontsize=9)
+    ax_c.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    outfile = os.path.join(save_path, f"{case_tag}_DLM_participants.png")
+    plt.savefig(outfile, dpi=150, bbox_inches='tight')
+    print(f"DLM participants plot saved to {outfile}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
 
 
 def plot_w_modal_components(pk_solver, config=None, save_path=""):

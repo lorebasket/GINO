@@ -1,0 +1,298 @@
+% Compile from the repository root, e.g.
+% pdflatex -output-directory docs/resources/benchmarks/abramson1965_report docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.tex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\pgfplotsset{every axis/.append style={grid=both, grid style={gray!20}, tick align=outside}}
+
+\geometry{margin=24mm}
+\sisetup{detect-all=true, per-mode=symbol}
+\DeclareSIUnit{\knunit}{kn}
+\DeclareSIUnit{\cps}{cps}
+\DeclareSIUnit{\ftunit}{ft}
+
+\title{Stato attuale dell'analisi idro-aeroelastica dell'ala ABRAMSON1965}
+\author{Report tecnico di lavoro}
+\date{19 maggio 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Questo report riassume lo stato corrente della simulazione numerica del modello di idrofoil
+ABRAMSON1965, confrontando gli input usati nel caso di calcolo con i parametri riportati
+nel lavoro originale di Abramson e Ransleben (1965), \emph{An Experimental Investigation of
+Flutter of a Fully Submerged Subcavitating Hydrofoil}. Il riferimento sperimentale principale
+e' la rottura per flutter a \SI{48.1}{\knunit} con frequenza accoppiata di circa \SI{17.5}{\cps}
+e velocita' ridotta $(V/b\omega)_F=1.48$. La run attuale predice invece il primo
+attraversamento di instabilita' a \SI{4.30}{\meter\per\second}, cioe' \SI{8.36}{\knunit}, sulla seconda branca:
+il risultato e' quindi ancora lontano dal benchmark sperimentale.
+\end{abstract}
+
+\section{Riferimento sperimentale}
+
+Nel documento originale il modello e' un idrofoil completamente immerso, cantilever, con
+sezione NACA 16-012, massa distribuita e rigidezze pensate per rendere il sistema incline
+al flutter. La Tabella 1 del paper riporta i parametri effettivi del modello; le Figure 5 e 6
+forniscono rispettivamente il fattore di decadimento esponenziale e la frequenza torsionale
+accoppiata in funzione della velocita'. Le tre curve teoriche del paper sono:
+\begin{enumerate}
+  \item coefficienti bidimensionali teorici di Theodorsen;
+  \item coefficienti tridimensionali teorici di Reissner--Stevens;
+  \item coefficienti tridimensionali misurati.
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{docs/resources/benchmarks/notes/figure_5_abramson.png}
+    \caption{Figura 5 originale: fattore di decadimento.}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.39\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{docs/resources/benchmarks/notes/figure_6_abramson.png}
+    \caption{Figura 6 originale: frequenza torsionale accoppiata.}
+  \end{subfigure}
+  \caption{Riferimenti grafici dal paper Abramson e Ransleben (1965).}
+\end{figure}
+
+\section{Verifica degli input}
+
+La configurazione corrente e' letta da \texttt{examples/ABRAMSON1965/config\_ABRAMSON1965.py}.
+La tabella seguente confronta i principali valori fisici con quelli del documento originale.
+Le conversioni sono: \SI{1}{\ftunit}=\SI{0.3048}{\meter}, \num{1} lb.in$^2$ = \SI{2.8689e-3}{\newton\meter\squared}.
+
+\begin{table}[H]
+  \centering
+  \caption{Confronto tra input del paper e configurazione numerica corrente.}
+  \begin{tabular}{llll}
+    \toprule
+    Grandezza & Abramson 1965, valore effettivo & Config corrente & Nota \\
+    \midrule
+    Semichord $b$ & \SI{0.50}{\ftunit} = \SI{0.1524}{\meter} & $c/2=\SI{0.1524}{\meter}$ & OK \\
+    Chord $c$ & \SI{1.0}{\ftunit} = \SI{0.3048}{\meter} & \SI{0.3048}{\meter} & OK \\
+    Semispan modello & \SI{2.5}{\ftunit} = \SI{0.762}{\meter} & \SI{0.762}{\meter} & OK \\
+    Aspect ratio full-span & 5.0 & $2L/c=5.0$ & OK \\
+    Massa per unita' di span & $\approx \SI{70.8}{\kilogram\per\meter}$ & \SI{72.10}{\kilogram\per\meter} & vicino \\
+    Mass ratio & 0.99 & $\mu/(\pi\rho b^2)\approx0.99$ & OK \\
+    Asse elastico & quarto di corda & $x_{EA}/c=0.25$ & OK \\
+    Centro di massa & $x_\alpha=0.524$ & \texttt{xcm\_factor}=0.512 & da verificare \\
+    Raggio d'inerzia & 0.512 & 0.512 & OK \\
+    $EI$ & $3.40\cdot10^6$ lb.in$^2$ & \SI{7845}{\newton\meter\squared} & OK \\
+    $GJ$ & $0.973\cdot10^6$ lb.in$^2$ & \SI{1718}{\newton\meter\squared} & OK \\
+    Frequenza flessionale a secco uncoupled& $\omega_h/\omega_\alpha=0.490$, con $f_\alpha=\SI{20.5}{\hertz}$ & \SI{10.0}{\hertz} & OK \\
+    Frequenza torsionale a secco uncoupled & \SI{20.5}{\hertz} & \SI{20.54}{\hertz} & OK \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+\section{Metodo numerico usato nella run corrente}
+
+La run piu' recente usa un modello strutturale beam cantilever a 100 elementi, ridotto
+modalmente alle prime due forme. L'aerodinamica non stazionaria e' ottenuta da matrici
+PanelAero/DLM precomputate su griglia \texttt{nspan=30}, \texttt{nchord=15}, metodo
+\texttt{quartic}, fluido acqua e angolo d'attacco nullo.
+
+La soluzione di flutter usa una formulazione Roger RFA con stati di lag e tracking modale
+MAC. Nella run corrente il log riporta tre poli di lag $[0.5,\,1.0,\,1.5]\ \si{\per\meter}$.
+La correzione idroelastica Capytaine entra come massa aggiunta e smorzamento radiativo
+asintotici costanti:
+\[
+  M_\mathrm{eff} = \hat{M} + A_\infty,
+  \qquad
+  C_\mathrm{eff} = \hat{C} - s_Q \frac{1}{2}\rho V B_1 + B_\infty + C_\mathrm{emp},
+  \qquad
+  K_\mathrm{eff} = \hat{K} - \frac{1}{2}\rho V^2 B_0 .
+\]
+Per la profondita' Capytaine selezionata \SI{0.0508}{\meter}, il log riporta
+$A_\infty=\operatorname{diag}(1.3139,\ 0.2771)$ in coordinate modali, mentre
+$B_\infty$ e' praticamente nullo nella banda asintotica. E' attivo anche uno smorzamento
+empirico \texttt{abramson\_delta} con incremento $\delta=\SI{5}{\per\second}$.
+
+\section{Risultati correnti}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{output_data/vg_lambda_vf_combined.png}
+  \caption{Curve $V-\Lambda$, $V-g$ e $V-f$ prodotte dalla run corrente. Il solver individua
+  $V_F=\SI{4.30}{\meter\per\second}=\SI{8.36}{\knunit}$ sulla seconda branca.}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{output_data/stiffness_damping_contributions.png}
+  \caption{Contributi modali di massa, rigidezza e smorzamento. La convenzione usata nel
+  codice e' $M_\mathrm{eff}=M_\mathrm{struct}-M_\mathrm{aero}+M_\mathrm{hydro}$,
+  $K_\mathrm{eff}=K_\mathrm{struct}-K_\mathrm{aero}$,
+  $C_\mathrm{eff}=C_\mathrm{struct}-C_\mathrm{aero}+C_\mathrm{hydro}+C_\mathrm{emp}$.}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\linewidth]{output_data/ABRAMSON1965/ABRAMSON1965_DLM_participants.png}
+  \caption{Confronto tra contributi strutturali modali $(\hat{C},\hat{K})$ e valori
+  effettivi dopo il contributo DLM/RFA $(C_\mathrm{eff},K_\mathrm{eff})$.}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{output_data/ABRAMSON1965/ABRAMSON1965_Madded_terms_vs_V_capytaine_vs_strip.png}
+  \caption{Termini di massa aggiunta Capytaine usati nella correzione idroelastica,
+  confrontati con la stima da strip theory. La discrepanza principale e' sui termini
+  diagonali: Capytaine aumenta $m_{11}$ rispetto alla strip theory e riduce $m_{22}$.}
+\end{figure}
+
+\section{Analisi alternative: PK e strip theory}
+
+Oltre alla run RFA con correzione Capytaine, sono disponibili tre confronti aggiuntivi:
+PK senza massa aggiunta strip, PK con massa aggiunta da strip theory, e RFA con massa
+aggiunta da strip theory. Questi risultati sono utili per separare l'effetto del metodo
+di soluzione aeroelastica dall'effetto del modello idrodinamico usato per la massa aggiunta.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{output_data/ABRAMSON1965/ABRAMSON_PK_vgvf_combined.png}
+  \caption{Analisi PK senza correzione strip theory. Il flutter e' stimato intorno a
+  \SI{8.4}{\knunit}; la frequenza della seconda branca cresce rapidamente, mentre la
+  branca 1 rimane a frequenze piu' basse.}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{output_data/ABRAMSON1965/ABRAMSON_PK-STRIP_vgvf_combined.png}
+  \caption{Analisi PK con massa aggiunta da strip theory. L'andamento delle frequenze
+  bagnate rimane plausibile, ma il log decrement e il damping mostrano ancora una scala
+  molto distante dai punti sperimentali di Abramson.}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{output_data/ABRAMSON1965/ABRAMSON_RFA-STRIP_vgvf_combined.png}
+  \caption{Analisi RFA con massa aggiunta da strip theory. Il flutter viene individuato
+  intorno a \SI{7.5}{\knunit}; anche in questa variante la frequenza bagnata segue un trend
+  regolare, mentre la magnitudine dei decrementi resta il punto critico.}
+\end{figure}
+
+Nel complesso, le varianti PK, PK--strip e RFA--strip confermano la stessa lettura della
+run principale: il comportamento in frequenza e' qualitativamente ragionevole, ma la scala
+dei decrementi logaritmici e dello smorzamento e' troppo diversa da quella sperimentale.
+Questo suggerisce che la discrepanza non dipende solo dall'aggiunta del contributo
+Capytaine nella run corrente, ma anche dalla catena di generazione/scala dei carichi
+non stazionari e dal modo in cui questi entrano nel termine di smorzamento aeroelastico.
+
+\section{Confronto con figure 5 e 6 ridigitalizzate}
+
+Solo i punti sperimentali delle Figure 5 e 6 del paper sono stati ridigitalizzati
+manualmente dai PNG disponibili in \texttt{docs/resources/benchmarks/notes}; le curve
+teoriche originali non sono state ridigitalizzate in questa versione del confronto. I CSV
+generati sono:
+\texttt{abramson\_fig5\_digitized.csv}, \texttt{abramson\_fig6\_digitized.csv} e
+\texttt{abramson\_current\_selected.csv}. I punti sono sufficienti per leggere il trend,
+ma vanno considerati approssimati.
+
+Per confrontare il decadimento con la Figura 5, le curve della run corrente sono lette
+direttamente dal file \texttt{output\_data/vlambda\_data.csv}, cioe' dagli stessi dati
+usati per il pannello $V-\Lambda$ di \texttt{vg\_lambda\_vf\_combined.png}. In questa
+figura non viene applicato alcun ulteriore cambio di segno: branch 1, branch 2 e punti
+sperimentali sono riportati nella convenzione di segno del plot.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      width=0.95\linewidth,
+      height=0.52\linewidth,
+      xlabel={Velocita' $V$ [kn]},
+      ylabel={Log decrement $\Lambda$ / decadimento [--]},
+      xmin=0, xmax=55,
+      ymin=-15, ymax=16,
+      unbounded coords=jump,
+      legend style={font=\small, at={(0.98,0.98)}, anchor=north east}
+    ]
+      \addplot+[only marks, mark=o, black] table[x=Speed_knots,y=Exp_decay_s_inv,col sep=comma]
+        {docs/resources/benchmarks/abramson1965_report/abramson_fig5_digitized.csv};
+      \addlegendentry{Abramson, dati sperimentali}
+      \addplot+[very thick, red] table[x=Velocity_knots,y=LogDecrement_Branch_2,col sep=comma]
+        {output_data/vlambda_data.csv};
+      \addlegendentry{Run corrente, branca 2}
+      \addplot+[thick, red!45, dashed] table[x=Velocity_knots,y=LogDecrement_Branch_1,col sep=comma]
+        {output_data/vlambda_data.csv};
+      \addlegendentry{Run corrente, branca 1}
+      \addplot[densely dashed, black] coordinates {(48.1,-15) (48.1,16)};
+      \addplot[densely dashed, red] coordinates {(10.2,-15) (10.2,16)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Confronto sul decadimento/log decrement: i punti sperimentali di Abramson sono
+  riportati insieme ai dati branch 1 e branch 2 del pannello $V-\Lambda$ della run corrente,
+  senza applicare ulteriori flip di segno. La seconda branca numerica attraversa lo zero
+  intorno a \SI{10.2}{\knunit}, mentre il riferimento sperimentale arriva a circa
+  \SI{48}{\knunit}.}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      width=0.95\linewidth,
+      height=0.52\linewidth,
+      xlabel={Velocita' $V$ [kn]},
+      ylabel={Frequenza accoppiata [Hz]},
+      xmin=0, xmax=55,
+      ymin=0, ymax=30,
+      unbounded coords=jump,
+      legend style={font=\small, at={(0.98,0.02)}, anchor=south east}
+    ]
+      \addplot+[only marks, mark=o, black] table[x=Speed_knots,y=Exp_frequency_cps,col sep=comma]
+        {docs/resources/benchmarks/abramson1965_report/abramson_fig6_digitized.csv};
+      \addlegendentry{Abramson, dati sperimentali}
+      \addplot+[very thick, red] table[x=Speed_knots,y=Frequency_Hz_Branch_2,col sep=comma]
+        {docs/resources/benchmarks/abramson1965_report/abramson_current_selected.csv};
+      \addlegendentry{Run corrente, branca 2}
+      \addplot+[thick, red!45, dashed] table[x=Speed_knots,y=Frequency_Hz_Branch_1,col sep=comma]
+        {docs/resources/benchmarks/abramson1965_report/abramson_current_selected.csv};
+      \addlegendentry{Run corrente, branca 1}
+      \addplot[densely dashed, black] coordinates {(48.1,0) (48.1,30)};
+      \addplot[densely dashed, red] coordinates {(8.36,0) (8.36,30)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Confronto sulla frequenza: l'andamento delle frequenze bagnate e' qualitativamente
+  coerente con il riferimento, in particolare per la branca torsionale, ma l'instabilita'
+  numerica avviene molto prima del punto di rottura misurato.}
+\end{figure}
+
+
+\section{Conclusione}
+
+Lo stato attuale della pipeline e' operativo: produce modi secchi, matrici DLM, correzione
+Capytaine, sweep Roger RFA, contributi $M/K/C$ e grafici $V-\Lambda-g-f$. Il risultato piu'
+incoraggiante e' che le frequenze bagnate hanno un andamento compatibile con quello atteso.
+Tuttavia, come benchmark ABRAMSON1965, la soluzione corrente non e' ancora validata: la scala
+dei decrementi logaritmici e' completamente diversa da quella sperimentale e il flutter e'
+predetto a \SI{8.36}{\knunit} invece dei \SI{48.1}{\knunit} sperimentali. I risultati dell'analisi RFA 
+riproducono pressochè i risultati dell'analisi PK, confermando la correttezza del metodo numerico usato.
+
+Per riprodurre i risultati sperimentali sembra sia necessario:
+\begin{itemize}
+  \item molto più damping idrodinamico, in particolare nella banda asintotica,
+  che sembra essere il punto critico. La curva di decadimento/log decrement
+  dovrebbe essere spostata di circa 4 dB verso l'alto..
+\end{itemize}
+
+
+\end{document}

@@ -186,6 +186,27 @@ def T6_from_beam_direction(beam_direction_global):
     return T
 
 
+def T6_for_element(element, nodes):
+    """
+    Element 6×6 map: use element['T6'] if set (multibody), else infer from
+    (node2 − node1) so local beam +Y matches the physical member direction.
+    """
+    T6 = element.get("T6", None)
+    if T6 is not None:
+        return np.asarray(T6, dtype=float)
+    n1_idx, n2_idx = element["nodes"]
+    p1 = np.asarray(nodes[n1_idx]["position"], dtype=float)
+    p2 = np.asarray(nodes[n2_idx]["position"], dtype=float)
+    d = p2 - p1
+    Lg = float(np.linalg.norm(d))
+    if Lg < 1e-14:
+        raise ValueError(
+            f"Beam element {element.get('nodes')} has zero length; cannot infer T6."
+        )
+    beam_dir = d / Lg
+    return T6_from_beam_direction(beam_dir)
+
+
 def rotate_beam_model_to_global(beam_model, beam_direction_global):
     """
     Rotate all node positions and element K/M matrices of *beam_model* (which

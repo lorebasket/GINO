@@ -1,6 +1,9 @@
 import os
 import numpy as np
 
+from FEA.fea_utl.multibody_assembly import T6_for_element
+
+
 def _save_global_matrix_to_csv(K_global, config):
 
     import csv
@@ -108,30 +111,15 @@ def assemble_global_stiffness_matrix(beam_model, config):
         element_length = element["length"]
         element_stiffness = element["stiffness"]
 
-        # Build 12×12 element stiffness in the element's *local* frame
-        # (beam axis = +Y, using Bauchau B-matrix formulation).
-        # The sectional stiffness 'element_stiffness' may already be rotated to
-        # the global frame (for multibody sub-beams); in that case we must first
-        # bring it back to local, compute Ke_local, then transform to global.
-        T6 = element.get('T6', None)
-        if T6 is not None:
-            T6 = np.array(T6, dtype=float)
-            # Recover local sectional stiffness: C_loc = T^{-T} @ C_glob @ T^{-1}
-            # Since T is orthogonal, T^{-1} = T^T:
-            C_local = T6.T @ element_stiffness @ T6
-        else:
-            C_local = element_stiffness
+        T6 = T6_for_element(element, nodes)
+        C_local = T6.T @ element_stiffness @ T6
 
         Ke_local = calculate_element_stiffness_matrix(C_local, element_length)
 
-        # Build the 12×12 global transformation (T12 = blockdiag(T6, T6))
-        if T6 is not None:
-            T12 = np.zeros((12, 12), dtype=float)
-            T12[:6,  :6]  = T6
-            T12[6:, 6:]   = T6
-            Ke = T12 @ Ke_local @ T12.T
-        else:
-            Ke = Ke_local
+        T12 = np.zeros((12, 12), dtype=float)
+        T12[:6, :6] = T6
+        T12[6:, 6:] = T6
+        Ke = T12 @ Ke_local @ T12.T
 
         # Assemble into global matrix
         for i in range(12):

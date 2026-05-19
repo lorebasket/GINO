@@ -13,9 +13,9 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
     vjj_dir = os.path.join(QJJ_path, f"vjj_ABRAMSON1965_{fluid}_alpha{attack_angle_deg}_nspan{nspan}_nchord{nchord}_quartic")
     aerogrid_path = os.path.join(qjj_dir, "aerogrid.npz")
 
-    V_low     = np.linspace(5,  10,  5)
-    V_flutter = np.linspace(10, 18, 30)
-    V_high    = np.linspace(18, 20,  5)
+    V_low     = np.linspace(2.5,  16,  50)
+    V_flutter = np.linspace(16, 20, 50)
+    V_high    = np.linspace(20, 23,  10)
 
     return AnalysisConfig(
         name='ABRAMSON1965',
@@ -29,7 +29,12 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         chord_tip=0.3048,
         thickness_factor=0.12,
         chordwise_strip_y=0.381,
-        pitch=0,
+        # Post-build rotation about +X (deg); see post_pitch_utils.
+        # pitch_rotate_beam / pitch_rotate_aerogrid: only trave, only DLM grid, or both (default).
+        pitch=-90,
+        pitch_rotate_beam=True,
+        pitch_rotate_aerogrid=False,
+        beam_span_axis=2, # 2 Z axis if pitch = -90 deg
 
         # ── Material & mass ───────────────────────────────────────────────
         rho_s=7000,
@@ -38,7 +43,7 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         v=0.3,
 
         # ── EA / CG locations ─────────────────────────────────────────────
-        xcm_factor=0.512,
+        xcm_factor=0.512, # c'è una convenzione con il raggio da tenere
         xea_factor=0.25,
 
         # ── Stiffness ─────────────────────────────────────────────────────
@@ -52,7 +57,17 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         GAz=1.0e8,
 
         # ── Rayleigh damping ──────────────────────────────────────────────
-        rayleigh_target_zetas=(-0.01, -0.01),
+        rayleigh_target_zetas=(0.09, 0.09),
+
+        # ── Im(Q) scale (RFA fit unscaled; applied in C_eff and optionally lag forcing) ──
+        aero_im_Q_scale=1.0,  # try 0.3–0.7 if aero destabilizes too early vs Abramson ~48 kn
+        aero_im_Q_scale_lags=False,
+
+        # ── Empirical fluid damping (Abramson Fig. 5: ~Δδ≈4 s⁻¹ above measured-Q curve) ──
+        empirical_fluid_damping=True,
+        empirical_fluid_model='abramson_delta',
+        empirical_fluid_delta_add_s=5.0, # It is recommended to use a value of 5.0 s⁻¹ for the empirical fluid damping.
+
 
         # ── Analysis struct params ────────────────────────────────────────
         modal_dir = os.path.join(FSI_path, "output_data", "ABRAMSON1965"),
@@ -62,25 +77,36 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         alpha_deg=attack_angle_deg,
         alpha_r=np.deg2rad(attack_angle_deg),
         V_list=np.concatenate([V_low, V_flutter, V_high]),
-        num_modes_flutter_egv=2,
 
-        # ── Roger RFA ─────────────────────────────────────────────────────
-        added_mass_strip_theory=True,
-        roger_fit=True,
-        roger_fit_modes=3,
-        k_list=np.linspace(0.001, 50, 400),
-        n_lag=1,
-        blag=np.linspace(4, 10, 1),
+        # ── Roger RFA lag poles ───────────────────────────────────────────
+        # PanelAero remains in k = omega/V [1/m].  These are dimensionless
+        # beta = k * semichord, converted in the solver to blag [1/m].
+        n_lag=4,
+        blag=np.array([0.5, 1.0, 1.5, 2.0]),
+        #rfa_blag_dimensionless=False,
+        #rfa_blag_ref_length='semichord',
 
         # ── Capytaine sweep ──────────────────────────────────────────────
+        capytaine_results_dir = os.path.join(FSI_path, "FLUID", "capytaine", "ABRAMSON1965", "results_modal_radiation"),
         mesh_path = os.path.join(FSI_path, "FLUID", "capytaine", "ABRAMSON1965", "ABRAMSON1965_mesh.vtu"),
         mesh_n_span = 30,
         mesh_n_chord = 30,
-        omega_list = np.linspace(1.0, 120, 60),
+        omega_list = np.linspace(0.1, 150, 300),
         free_surface_elevation = 0.0,
-        water_depth = 1.0,
-        depth = np.linspace(0.01, 0.5, 30),
-        
+        water_depth = np.inf,
+        depth = [0.0508, 0.052], #np.linspace(0.01, 0.5, 30),
+        depth_index = 0,
+
+        # ── Plotting ──────────────────────────────────────────────────────
+        plot_log_decrement_vg=True,
+        show_stiffness_damping_contributions_plot=True,
+        plot_DLM_participants=True,
+        vf_hertz=True,
+        v_knots=True,
+        plot_added_mass_capytaine_vs_strip=True,
+        plot_stiffness_damping_contributions=True,
+        dimensionless_vgvf_results=True,
+
         # ── Aerodynamic grid ──────────────────────────────────────────────
         nspan=nspan,
         nchord=nchord,

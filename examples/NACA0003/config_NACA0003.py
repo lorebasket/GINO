@@ -25,11 +25,10 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         dihedral_angle=0.0,
         xcm_factor=0.5,
         xea_factor=0.5,
-        clamped_node_idx=np.array([0, -1]),
+        pitch=0,
+
         offset_z=-100,
 
-        # ── Capytaine / hydrodynamics ─────────────────────────────────────
-        green_function='rankine',
         omega_range=np.linspace(0.001, 10, 10),
 
         # ── Section coordinates (normalized by chord length) ──────────────
@@ -67,32 +66,35 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         # ── Material ──────────────────────────────────────────────────────
         rho_s=7800,
         v=0.33,
+        shear_factor=0.85,
         E=115e9,
 
         # ── Flutter sweep ─────────────────────────────────────────────────
         save_matrices=True,
-        pitch=0,
         alpha_deg=attack_angle_deg,
         alpha_r=np.deg2rad(attack_angle_deg),
         V_list=np.linspace(0.01, 50, 25),
         num_modes_flutter_egv=2,
-        num_modes=2,
+        dimensionless_vgvf_results=False,
+
+        # ── Analysis struct params ────────────────────────────────────────
+        modal_dir = os.path.join(FSI_path, "output_data", "NACA0003"),
+        prefix = "NACA0003_dry_egv",
 
         # ── Constrained nodes ─────────────────────────────────────────────
         constrained_nodes={'root': [0], 'tip': [-1]},
+        clamped_node_idx=np.array([0, -1]),
 
-        # ── Roger RFA ─────────────────────────────────────────────────────
-        roger_fit=True,
-        n_lag=3,
-
-        # ── Hybrid non-circulatory operator ───────────────────────────────
-        hybrid_nc_operator=True,
-        strip_theory_added_mass=True,
-        capytaine_singlebody=True,
-
-        # ── Post-processing ───────────────────────────────────────────────
-        plot_aerobeam=True,
-        plot_mode_shapes=True,
+        # ── Capytaine sweep ──────────────────────────────────────────────
+        capytaine_results_dir = os.path.join(FSI_path, "FLUID", "capytaine", "NACA0003", "results_modal_radiation"),
+        mesh_path = os.path.join(FSI_path, "FLUID", "capytaine", "NACA0003", "NACA0003_mesh.vtu"),
+        mesh_n_span = 20,
+        mesh_n_chord = 20,
+        omega_list = np.linspace(0.1, 50, 80), #np.linspace(0.1, 150, 300),
+        free_surface_elevation = 0.0,
+        water_depth = np.inf,
+        depth = [5], #np.linspace(0.01, 0.5, 30),
+        depth_index = 0,
 
         # ── Aerodynamic grid ──────────────────────────────────────────────
         nspan=nspan,

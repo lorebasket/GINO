@@ -14,6 +14,7 @@ from FEA.fea_utl import (
 )
 from FEA.fea_utl import guyan_reduction
 from FEA.fea_utl.mode_classifier import ModeClassifier
+from FEA.fea_utl.rotate_beams_x import get_T6_x
 
 # Define a result object for clarity
 StructuralResults = namedtuple('StructuralResults', [
@@ -109,57 +110,116 @@ def _create_gravity_force_vector(beam_model, total_dof, gravity_acc, dof_per_nod
 
 
 def mass_matrix_strip_theory(M_global, config):
+    """
+    Lumped added mass per node from 2-D strip theory (circular cylinder / thin foil approximation).
+    Uses ``m_a' = rho * pi * c^2 / 4`` per unit length (Theodorsen-type sectional added mass scale).
+
+    ``strip_theory_span_axis`` (optional): global translation index (0,1,2) along the *undeformed*
+    beam reference used by ``create_beam_model`` (beam along +Y → use ``1`` so transverse DOFs
+    are X and Z). This is independent of ``beam_span_axis``, which other modules use for the
+    meshed / post-pitch geometry. If unset, defaults to ``1`` (project FEA reference layout).
+    """
     import numpy as np
 
-    # strip theory added mass per unit length
-    rho = getattr(config, 'rho_f', {}).get(getattr(config, 'fluid', 'air'), 1.02)
-    m_a_prime = rho * np.pi * (config.chord**2) / 4.0
+    # ── Extract fluid properties ──────────────────────────────────────────────────────
+    fluid = getattr(config, "fluid", "water")
+    rho_default = 997.0 if str(fluid).lower() == "water" else 1.02
+    rho = float(getattr(config, "rho_f", {}).get(fluid, rho_default))
+    chord = float(config.chord)
 
-    # grid
-    L = config.beam_length
-    N = config.n_elements + 1  # number of nodes
-    y = np.linspace(0, L, N)
-    dy = y[1] - y[0]
+    # ── Compute added mass per unit length ──────────────────────────────────────────────────────
+    m_a_prime = rho * np.pi * (chord**2) / 4.0
 
+    # ── Compute beam properties ──────────────────────────────────────────────────────
+    L = float(config.beam_length)
+    n_el = int(getattr(config, "n_elements", 0))
+    if n_el <= 0:
+        raise ValueError("config.n_elements must be positive for strip added mass.")
+    dy = L / float(n_el)
+    N = n_el + 1
+
+    # ── Compute total number of DOFs ──────────────────────────────────────────────────────
     ndof_per_node = 6
-    ndof_total = N * ndof_per_node
+    ndof_total = int(M_global.shape[0])
+    if ndof_total % ndof_per_node != 0:
+        raise ValueError(f"M_global row count {ndof_total} is not a multiple of {ndof_per_node}.")
+    n_nodes = ndof_total // ndof_per_node
+    if N != n_nodes:
+        print(
+            f"[strip added mass] Warning: n_elements+1={N} != n_nodes from M_global={n_nodes}; "
+            f"using n_nodes={n_nodes} for lumping."
+        )
+        N = n_nodes
 
-    # -----------------------------
-    # BUILD 1D CONSISTENT MASS MATRIX
-    # (simple trapezoidal / lumped hybrid)
-    # -----------------------------
-    M_1D = np.zeros_like(M_global)
+    # ── Compute added mass per node ──────────────────────────────────────────────────────
+    span_axis = int(getattr(config, "strip_theory_span_axis", 1))
+    transverse = tuple(i for i in (0, 1, 2) if i != span_axis)
+    m_each = 0.5 * m_a_prime * dy
 
+    M_global_added = np.zeros((ndof_total, ndof_total), dtype=float)
     for i in range(N):
-        M_1D[i, i] += m_a_prime * dy
+        for tr in transverse:
+            g = i * ndof_per_node + tr
+            M_global_added[g, g] += m_each
 
-    # -----------------------------
-    # GLOBAL MATRIX (606x606)
-    # -----------------------------
-    M_global_added = np.zeros((ndof_total, ndof_total))
-
-    # DOF ordering per node:
-    # [u, v, w, ry, rx, rz]
-    W_DOF_INDEX = 2
-
-    for i in range(N):
-        for j in range(N):
-            global_i = i * ndof_per_node + W_DOF_INDEX
-            global_j = j * ndof_per_node + W_DOF_INDEX
-
-            M_global_added[global_i, global_j] = M_1D[i, j]
-
-    # -----------------------------
-    # CHECK
-    # -----------------------------
-    print("Global matrix shape:", M_global_added.shape)
+    print(
+        f"[strip added mass] rho={rho:g} kg/m³, m_a'={m_a_prime:g} kg/m, dy={dy:g} m, "
+        f"lump {m_each:g} kg per transverse DOF ({transverse[0]},{transverse[1]}) per node, "
+        f"strip_theory_span_axis={span_axis}, shape={M_global_added.shape}"
+    )
     return M_global_added
 
 
-def added_mass_projection(M_global, dry_vectors, sorted_mode_indices, config, total_dof, constrained_dofs=None):
+def _strip_mass_congruent_with_structural_pitch(M_added_ref: np.ndarray, pitch_deg: float, total_dof: int) -> np.ndarray:
+    """
+    Match ``post_pitch_utils.apply_structural_pitch_about_x``: structural M uses
+    M' = Tᵀ M T with T = Iₙ ⊗ T₆ₓ. Strip mass is assembled in the unpitched reference
+    (transverse translational DOFs); rotate it with the same congruence so modal
+    projection uses the same global DOF basis as ``dry_eigenvectors``.
+    """
+    pitch_deg = float(pitch_deg)
+    if abs(pitch_deg) < 1e-12:
+        return M_added_ref
+    ndof_per_node = 6
+    if total_dof % ndof_per_node != 0:
+        raise ValueError(f"total_dof={total_dof} is not a multiple of {ndof_per_node}.")
+    n_nodes = total_dof // ndof_per_node
+    if M_added_ref.shape != (total_dof, total_dof):
+        raise ValueError(
+            f"Strip mass shape {M_added_ref.shape} does not match total_dof={total_dof}."
+        )
+    Tx6 = get_T6_x([pitch_deg])
+    T_full = np.kron(np.eye(n_nodes, dtype=float), Tx6)
+    M_out = T_full.T @ M_added_ref @ T_full
+    print(
+        f"[strip added mass] applied structural pitch congruence: pitch_deg={pitch_deg:g}, "
+        f"‖M_ref‖_F={np.linalg.norm(M_added_ref, 'fro'):.6g}, ‖M'‖_F={np.linalg.norm(M_out, 'fro'):.6g}"
+    )
+    return M_out
+
+
+def added_mass_projection(
+    M_global,
+    dry_vectors,
+    sorted_mode_indices,
+    config,
+    total_dof,
+    constrained_dofs=None,
+    apply_structural_pitch=False,
+):
     print("\nCalculating strip theory added mass matrix...")
 
     M_added_strip = mass_matrix_strip_theory(M_global, config)
+    pitch_deg = float(getattr(config, "pitch", 0.0))
+    if apply_structural_pitch:
+        M_added_strip = _strip_mass_congruent_with_structural_pitch(
+            M_added_strip, pitch_deg, total_dof
+        )
+    elif abs(pitch_deg) > 1e-12:
+        print(
+            f"[strip added mass] pitch_deg={pitch_deg:g} set but not applied to M_added "
+            f"(modal projection uses reference-frame dry eigenvectors)."
+        )
 
     # Constraints application
     dof_per_node = 6
@@ -173,10 +233,33 @@ def added_mass_projection(M_global, dry_vectors, sorted_mode_indices, config, to
     fixed_dofs = np.array(constrained_dofs, dtype=int)
 
     M_cant_added_strip = M_added_strip[np.ix_(free_dofs, free_dofs)].astype(np.float64)
-    Phi_for_reduction = dry_vectors[:, sorted_mode_indices]  # Select modes in frequency order
+    idx = np.asarray(sorted_mode_indices, dtype=int).ravel()
+    if idx.size == 0:
+        raise ValueError("sorted_mode_indices is empty.")
+    if idx.max() >= dry_vectors.shape[1] or idx.min() < 0:
+        raise ValueError(
+            f"Mode index out of range for dry_vectors columns: got {sorted_mode_indices}, "
+            f"shape[1]={dry_vectors.shape[1]}."
+        )
+    Phi_for_reduction = dry_vectors[:, idx]
 
     M_hat_added = Phi_for_reduction.T @ M_cant_added_strip @ Phi_for_reduction
-    
+    m_gen = np.array([float(Phi_for_reduction[:, j].T @ M_cant_added_strip @ Phi_for_reduction[:, j])
+                      for j in range(Phi_for_reduction.shape[1])])
+    print(
+        f"[strip added mass] modal M_hat_added diagonal: {np.diag(M_hat_added)} "
+        f"(shape {M_hat_added.shape})"
+    )
+    print(
+        f"[strip added mass] ‖M_add‖_F={np.linalg.norm(M_cant_added_strip, 'fro'):.6g}, "
+        f"‖M_hat_added‖_F={np.linalg.norm(M_hat_added, 'fro'):.6g}, "
+        f"generalized added mass per mode: {m_gen}"
+    )
+    if np.all(np.abs(m_gen) < 1e-6 * max(np.linalg.norm(M_cant_added_strip, 'fro'), 1.0)):
+        print(
+            "[strip added mass] WARNING: projected added mass is negligible — "
+            "check strip_theory_span_axis vs mode shape content on transverse DOFs."
+        )
     return M_hat_added, Phi_for_reduction
 
 
@@ -184,7 +267,8 @@ def added_damping_projection(factor, M_global, dry_vectors, sorted_mode_indices,
     print("\nCalculating strip theory added damping matrix...")
 
     # For demonstration, we create a simple proportional damping matrix based on the mass matrix
-    C_added_strip = factor * mass_matrix_strip_theory(M_global, config)  # 1% of added mass as damping
+    M_strip_ref = mass_matrix_strip_theory(M_global, config)
+    C_added_strip = factor * M_strip_ref
 
     # Constraints application
     dof_per_node = 6
@@ -375,7 +459,10 @@ def run_dry_analysis(beam_model, config):
     # ==========================
     if config.added_mass_strip_theory:
         print("\nIncluding strip theory added mass in modal reduction...")
-        M_hat_added, Phi_for_reduction = added_mass_projection(M_global, dry_vectors, sorted_mode_indices, config, total_dof, constrained_dofs=None)
+        M_hat_added, Phi_for_reduction = added_mass_projection(
+            M_global, dry_vectors, sorted_mode_indices, config, total_dof,
+            constrained_dofs=constrained_dofs,
+        )
 
         # ADDED DAMPING ESTIMATION
         factor = 0   # Example: 1% of added mass as damping
@@ -442,7 +529,7 @@ def run_dry_analysis(beam_model, config):
             
             # Get eigenvalues and eigenvectors from structural results
             # Important: These should already have matching dimensions (n_modes_reduced)
-            eigenvalues = dry_omega_sq  # omega_n^2 from state-space solve (length: n_modes_reduced)
+            eigenvalues = dry_omega_sq  # undamped ω_n² from reduced K_hat, M_hat
             eigenvectors = dry_vectors_full  # Full DOF space eigenvectors (columns: n_modes_reduced)
             
             # Verify dimensions match

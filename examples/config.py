@@ -24,9 +24,9 @@ sys.path.append(os.path.join(FSI_path, 'STRUCTURE', 'SONATA', '6_AGARD445.6', 'c
 GLOBAL_FLAGS = {
 
     # ── Beam model ────────────────────────────────────────────────────────────
-    'n_elements':                       300,
-    'nspan':                            22,
-    'nchord':                           11,
+    'n_elements':                       100,
+    'nspan':                            18,
+    'nchord':                           9,
 
     # ── Modal analysis ────────────────────────────────────────────────────────
     'num_modes_egv':                    2, # number of computed modes dry analysis
@@ -44,7 +44,7 @@ GLOBAL_FLAGS = {
     'save_modal_data':                  True,
 
     # ── Visualization ─────────────────────────────────────────────────────────
-    'plot_mode_shapes':                 True,
+    'plot_mode_shapes':                 False,
     'plot_aerobeam':                    False,
     'plot_full_wing':                   False,
     'plot_chordwise_strip':             False,
@@ -55,10 +55,20 @@ GLOBAL_FLAGS = {
     'mode_scale_factor':                0.5,
     'classify_modes':                   False,   # analyses modes energy distribution
     'show_eigen_plot':                  True,
+    'plot_pk_wet_eigenvectors':         True,  # ω(V), g(V) for wet roots not tracked by PK
+    'plot_DLM_participants':            True,  # C_hat, K_hat, C_eff, K_eff vs V (Roger RFA / _build_A_aug)
+    'plot_stiffness_damping_contributions': True,  # K/C struct vs aero vs eff (PK or RFA-PK)
+    'show_stiffness_damping_contributions_plot': False,  # display the M/K/C contribution figure interactively
+    'plot_added_mass_capytaine_vs_strip': False,  # RFA-PK only: compare Capytaine AM with strip-theory AM
 
     # ── Force computation ─────────────────────────────────────────────────────
     'compute_tip_forces':               False,
     'track_tip_forces_during_flutter':  False,
+
+    # ── Post-build pitch (post_pitch_utils) ─────────────────────────────────────
+    # When pitch != 0: rotate beam (nodes, K/M, modes) and/or DLM aerogrid about +X.
+    'pitch_rotate_beam':                True,
+    'pitch_rotate_aerogrid':            True,
 
     # ── Structural physics ────────────────────────────────────────────────────
     'geometric_nonlinearity':           False,
@@ -69,33 +79,70 @@ GLOBAL_FLAGS = {
     # ── Fluid-at-rest (wet modes) ─────────────────────────────────────────────
     'fluid_at_rest':                    False,
     'modal_capytaine_dofs':             False,
+    
+    # ── Capytaine radiation ────────────────────────────────────────────────────
+    'rigid_body_motion':                False,  # Capytaine radiation (run_modal_radiation.py): True → 6 rigid-body DOFs; False → modal / --modes face fields.
+    'rigid_body_rotation_center':       None,  # Optional (x, y, z) [m] for rigid-body rotations; if None, Capytaine uses mesh area centroid of face centers.
 
     # ── FLUTTER analysis method ───────────────────────────────────────────────
     'pk_method':                        False,   # P-K method aeroelastic analysis
-    'roger_fit':                        True,  # Roger RFA hydroelastic analysis
+    'roger_fit':                        False,  # Roger RFA hydroelastic analysis
+    'RFA_PK_method':                    True,
 
     # ── P-K method — flags ────────────────────────────────────────────────────
     'mac_matching':                     True,
     'last_converged_mode_matching':     True,
     'k_guess':                          0.001,
+    
+    # If True, reset k to k_guess at the start of every PK iteration (j >= 1), not only at j=0
+    'pk_use_k_guess_each_iter':         False,
+    'dimensionless_vgvf_results':       True,
+    'plot_log_decrement_vg':            False,  # also save vg_lambda_vf_combined.png (V–Λ, V–g, V–f; PK or RFA)
+    'v_knots':                          False,  # plot/export airspeed in knots (stored SI in CSV)
+    'vf_hertz':                         False,  # plot/export frequency in Hz (stored rad/s in CSV)
 
     # ── Roger RFA ─────────────────────────────────────────────────────────────
     'k_list':                           np.linspace(0.001, 50, 100),
-    'n_lag':                            3,
-    'blag':                             np.linspace(0.3, 1, 3),
-
+    'n_lag':                            4,
+    'blag':                             np.array([0.5, 1.0, 1.5, 2.0]),
+    'rfa_blag_dimensionless':            False,
+    'rfa_blag_ref_length':               'semichord',
+    
+    'rfa_adaptive_k_list':              False, # False: fit Q(k) on fixed config.k_list / config.blag at every V (smoother V–g–f)
+    'rfa_adaptive_blag':                False, # False: fit Q(k) on fixed config.k_list / config.blag at every V (smoother V–g–f)
+    
+    # MAC on [q; q_dot] only — lag states must not drive mode tracking
+    'rfa_mac_structural_dof':           True, # MAC on [q; q_dot] only — lag states must not drive mode tracking
+    'rfa_apply_b2_mass':                False, # False = hydroelastic correction: AM in M_hat (strip/Capytaine), Roger without B2
+    'rfa_k_fit_min':                    0.05, # Exclude k → 0 from Roger LSQ (dominates error, not flutter physics)
+    'rfa_weight_fit_k':                 True, # Weight Roger fit toward k ≈ ω_n/V at each airspeed step
+    'rfa_weight_fit_sigma':             0.6,
+    'capytaine_asymptotic_omega_frac':  0.5, # Capytaine asymptotic band for RFA_PK_method (ω >= om_min + frac*(om_max-om_min))
+    'capytaine_asymptotic_omega_min':   np.nan,
+    'aero_im_Q_scale':                  1.0, # Scale Im(Q) only in C_eff / C_aero assembly (Roger RFA fit uses unscaled Q_modal)
+    'aero_im_Q_scale_lags':             False, # Also scale Roger lag-state aerodynamic forcing q_dyn*Blag by aero_im_Q_scale.
+    'empirical_fluid_damping':          False, # Empirical fluid damping (tank / gaps / unmodeled dissipation; not Capytaine radiation)
+    'empirical_fluid_model':            'abramson_delta', # 'abramson_delta' | 'constant_kg_s' | 'velocity_linear' | 'delta_at_omega'
+    'empirical_fluid_delta_add_s':      4.0,   # extra δ [s⁻¹] in Abramson Fig. 5 gap → C_ii=2δM_ii
+    'empirical_fluid_C_kg_s':           15.0,  # diagonal [kg/s] for model='constant_kg_s'
+    'empirical_fluid_C_per_ms':         0.0,   # add C_ii += value * V [kg/s per m/s]
+    'empirical_fluid_omega_ref_rad_s':  70.0,  # for model='delta_at_omega'
+    
     # ── P-K solver — iteration & mode-matching parameters ────────────────────
-    'pk_tol':                           1e-2,
-    'pk_fXK0':                          0.618,
-    'pk_fRLX':                          0.6,
-    'pk_freq_margin':                   0.05,
-    'pk_perturb_k':                     1,
-    'pk_max_iter':                      150,
-    'pk_w_freq':                        0.8,
-    'pk_w_mac':                         0.6,
+    'pk_tol':                           1e-2, # Tolerance for PK iteration convergence
+    'pk_fXK0':                          0.618, # Factor for XK0 update in PK iteration
+    'pk_fRLX':                          0.8, # Factor for RLX update in PK iteration
+    'pk_freq_margin':                   0.05, # Frequency margin for PK iteration
+    'pk_perturb_k':                     1, # Perturbation factor for k in PK iteration
+    'pk_max_iter':                      150, # Maximum number of iterations for PK iteration
+    'pk_w_freq':                        0.8, # Weight for frequency in PK iteration
+    'pk_w_mac':                         0.6, # Weight for MAC in PK iteration
+    'pk_skip_inter_mode_on_perfect_mac': True, # Skip inter-mode frequency separation when MAC pre-selector = 1.0 (crossed modes)
+    'pk_predict_and_select':              True, # Yuan & Zhang (2023): linear p extrapolation reorder between airspeed steps
+    'pk_min_root_sep_rad':                1.0, # Min |Δω| [rad/s] between modes at same V (allows crossing, blocks coalescence)
 
     # ── Roger RFA — MAC mode-tracking parameters ──────────────────────────────
-    'rfa_freq_margin':                  0.15,
+    'rfa_freq_margin':                  0.20,
     'rfa_w_freq':                       0.8,
     'rfa_w_mac':                        0.6,
 
@@ -105,7 +152,7 @@ GLOBAL_FLAGS = {
 
     # ── Circulatory components ──────────────────────────────────────────────────
     'added_mass_strip_theory':          False,
-    'capytaine_BEM_modal_analysis':     True,
+    'resting_fluid_analysis':           False,
 
     # ── Velocity sweep (fallback — most cases override this) ─────────────────
     'V_list': np.concatenate([
