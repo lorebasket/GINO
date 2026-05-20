@@ -82,7 +82,7 @@ Available `blade_name` values (method 1 — flat CAERO1 panel):
 | `NACA0003` | NACA0003 thin hydrofoil |
 | `1x1grid` | Unit square panel (debugging) |
 
-For more detailed geometries (e.g. `wing01`), `executer.py` supports a **curve-based aerogrid** (method 2): instead of a flat CAERO1 panel, the grid is built by interpolating between explicit **Leading Edge (LE)** and **Trailing Edge (TE)** 3-D point clouds. The LE/TE coordinates are read from two Python files located in `SONATA/<blade_name>/TELE_coords/` (`LE_curve_points.py` and `TE_curve_points.py`), each exposing a list or array of `[x, y, z]` points in millimetres. When `blade_name == 'wing01'` the method is selected automatically and the Qjj matrices are precomputed on the resulting panel grid exactly as in method 1.
+For more detailed geometries (e.g. `wing01`), `executer.py` supports a **curve-based aerogrid** (method 2): instead of a flat CAERO1 panel, the grid is built by interpolating between explicit **Leading Edge (LE)** and **Trailing Edge (TE)** 3-D point clouds. For `wing01`, LE/TE coordinates (`le_points_wing01`, `te_points_wing01`) live in `examples/wing01/config_wing01.py` as `[x, y, z]` points in millimetres. Other blades may still use `SONATA/<blade_name>/TELE_coords/` (`LE_curve_points.py`, `TE_curve_points.py`). When `blade_name == 'wing01'` the method is selected automatically and the Qjj matrices are precomputed on the resulting panel grid exactly as in method 1.
 
 ### 2. Set the reduced frequency and velocity ranges
 

@@ -37,6 +37,7 @@ class Logger:
 
 
 from examples import config
+from FEA import post_pitch_utils
 from FEA import structural_model
 from FEA import structural_analysis
 import aerodynamic_model
@@ -173,8 +174,6 @@ def run_flutter_analysis_single(case_name, alpha_deg, *, n_lag=None, vg_vf_outpu
     if analysis_config.name == "ABRAMSON1965" and abs(
         float(getattr(analysis_config, "pitch", 0.0))
     ) > 1e-12:
-        import post_pitch_utils
-
         rotate_beam = bool(getattr(analysis_config, "pitch_rotate_beam", True))
         rotate_aerogrid = bool(getattr(analysis_config, "pitch_rotate_aerogrid", True))
         structural_results, beam_model, aerogrid = post_pitch_utils.apply_structural_pitch_about_x(

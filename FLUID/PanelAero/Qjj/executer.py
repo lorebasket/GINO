@@ -20,7 +20,6 @@ def main(start_time=None):
         FSI_path,
         FSI_path + '/FLUID/PanelAero',
         FSI_path + '/FLUID/PanelAero/panelaero_utl',
-        FSI_path + '/STRUCTURE/SONATA/wing01',
         FSI_path + '/STRUCTURE/SONATA/arm01'
     ])
 
@@ -222,7 +221,23 @@ def main(start_time=None):
 
                 def _import_submodule(blade, submodule_name):
                     """Import LE_curve_points or TE_curve_points from the blade's dir."""
-                    
+                    from types import SimpleNamespace
+
+                    if blade == 'wing01':
+                        mod_file = Path(FSI_path) / 'examples' / 'wing01' / 'config_wing01.py'
+                        spec = importlib.util.spec_from_file_location(
+                            'examples.wing01.config_wing01', mod_file
+                        )
+                        cfg = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(cfg)
+                        if submodule_name == 'LE_curve_points':
+                            return SimpleNamespace(le_points_wing01=cfg.le_points_wing01)
+                        if submodule_name == 'TE_curve_points':
+                            return SimpleNamespace(te_points_wing01=cfg.te_points_wing01)
+                        raise ValueError(
+                            f"Unknown submodule {submodule_name!r} for wing01 (expected LE_curve_points or TE_curve_points)"
+                        )
+
                     if blade == 'tnz_arm':
                         gr_dir = Path(FSI_path) / 'STRUCTURE' / 'SONATA' / 'ETNZ' / blade
                         mod_file = gr_dir / f'{submodule_name}.py'
