@@ -2,7 +2,7 @@
 
 import numpy as np
 from collections import namedtuple
-from .hydroelastic_utl import pk_solverv3
+#from .hydroelastic_utl import pk_solverv3
 from .hydroelastic_utl import pk_solver_capytaine
 from .hydroelastic_utl import pk_method, aero_system, hydro_system, empirical_fluid_damping, aero_q_scaling
 from .hydroelastic_utl import vgvf_plotting

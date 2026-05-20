@@ -368,10 +368,10 @@ def _build_abramson_model(config):
     # Note: r_α² already includes geometric scaling, do NOT multiply by b²
     r2 = config.radius_gyration       # value in unit of semichord (nondimensional)
     b = config.chord / 2              # semichord
-    r2 = (r2 *b)**2                     # DImensionally consistent with μ in kg/m → I_p in kg·m
+    r2_dim = r2 *(b**2)                     # DImensionally consistent with μ in kg/m → I_p in kg·m
     thickness = config.thickness_factor * config.chord
 
-    i11 = config.mu * r2              # [kg·m]  polar inertia about elastic axis (torsion)
+    i11 = config.mu * r2_dim              # [kg·m]  polar inertia about elastic axis (torsion)
     i22 = config.k_i22 * i11          # [kg·m]  scaled component (chordwise bending)
     i33 = config.k_i33 * i11          # [kg·m]  scaled component (vertical bending)
     #i22 = config.mu * (thickness / 2)**2 / 12

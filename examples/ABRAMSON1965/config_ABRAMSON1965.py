@@ -38,17 +38,17 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
 
         # ── Material & mass ───────────────────────────────────────────────
         rho_s=7000,
-        mu=72.10,
+        mu=72.14, # total weight 121.2lb = 54.97 kg → 72.14 kg/m
         radius_gyration=0.512,
         v=0.3,
 
         # ── EA / CG locations ─────────────────────────────────────────────
-        xcm_factor=0.512, # c'è una convenzione con il raggio da tenere
+        xcm_factor=0.512, # 0.25 * chord + x_alpha * (chord / 2) = 0.25 * chord + 0.524 * (chord / 2) = 0.512 * chord
         xea_factor=0.25,
 
         # ── Stiffness ─────────────────────────────────────────────────────
-        EIxx=7845,
-        GJ=1718,
+        EIxx=9.76e3, # 3.40×106 lbf\cdotpin2→9.76×103 N\cdotpm2
+        GJ= 2.79e3, # 0.973×106 lbf\cdotpin2→2.79×103 N\cdotpm2
         k_i22=0.3,
         k_i33=0.7,
         EA=1.0e8,
@@ -57,7 +57,7 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         GAz=1.0e8,
 
         # ── Rayleigh damping ──────────────────────────────────────────────
-        rayleigh_target_zetas=(0.09, 0.09),
+        rayleigh_target_zetas=(0.09, 0.09), # high structural damping due to geometrical experiment manufacturing
 
         # ── Im(Q) scale (RFA fit unscaled; applied in C_eff and optionally lag forcing) ──
         aero_im_Q_scale=1.0,  # try 0.3–0.7 if aero destabilizes too early vs Abramson ~48 kn
