@@ -16,7 +16,60 @@ limitations.
 
 Copyright (C) 2025 Lorenzo Baraltech — Dual-licensed under [GPL-3.0-or-later](LICENSE) or a separate [commercial license](COMMERCIAL_LICENSE.md).
 
-The framework couples a **finite element beam model** (FEA), an **aerodynamic panel method** (DLM), a **boundary element method** (BEM), and a **flutter solver** (P-K method or Roger RFA) to predict the flutter onset speed and frequency of hydrofoils, wings, and multi-body structures.
+The framework couples a **finite element beam model** (FEA), the **unsteady vortex lattice method** (UVLM, via SHARPy) for the circulatory loads, a **boundary element method** (BEM, via Capytaine) for added mass, radiation damping and free-surface effects, and a **flutter solver** (p-k method or self-consistent p-k scan) to predict the flutter onset speed and frequency of hydrofoils, wings, and multi-body structures.
+
+---
+
+## Architecture
+
+```
+            STRUCTURE                               FLUID
+  ┌───────────────────────────┐   ┌───────────────────────────────────────────┐
+  │ SONATA + ANBA4            │   │ SHARPy linear UVLM  (FLUID/sharpy)        │
+  │  6x6 section matrices     │   │  lifting surfaces at the beam nodes       │
+  │          ↓                │   │  → modal GAF table Q(k) on GINO's modes   │
+  │ FEA beam (STRUCTURE/FEA)  │──▶│    (FLUID/PanelAero/Qjj/Quvlm_*.npz)      │
+  │  dry modes Φ, M̂, K̂, Ĉ     │   │                                           │
+  │                           │──▶│ Capytaine BEM  (FLUID/capytaine)          │
+  └───────────────────────────┘   │  closed hull, free surface at depth h     │
+                                  │  → A(ω), B(ω) projected on the same modes │
+                                  └───────────────────────────────────────────┘
+                                                     ↓
+                      COUPLING (modal space, same basis for all operators)
+         [ -ω² (M̂ + ΔA(ω)) + iω (Ĉ + B(ω)) + K̂ − q∞ Q(k) ] q = 0 ,  k = ωb/V
+                                                     ↓
+                 p-k tracking (flutter_solver)  /  self-consistent scan (utl/scan.py)
+                                                     ↓
+                              V-g, V-f, flutter speed and frequency
+```
+
+**Structure.** The beam is built from analytical section properties or from the SONATA / ANBA4
+cross-section matrices; the dry modes (mass-normalised, `M̂`, `K̂`, `Ĉ`) are the common basis of
+every fluid operator.
+
+**UVLM (circulatory loads).** SHARPy's linearised UVLM is built on the same beam, the modal
+displacements are imposed on the lattice and the generalised aerodynamic forces are tabulated in
+reduced frequency, `Q(k)` (`FLUID/sharpy/gino_bem/precompute_quvlm*.py`). The table is projected on
+GINO's modes, so it must be regenerated whenever the dry frequencies change. `aero_method = "UVLM"`
+in the case config selects it; the DLM panel method (PanelAero) is kept for legacy comparisons only.
+
+**BEM (added mass, radiation, free surface).** Capytaine solves the radiation problem of the
+submerged hull (strut, pod, foils) with the free surface at the actual depth, and returns the modal
+added mass `A(ω)` and radiation damping `B(ω)`. The UVLM, which has no free surface, already contains
+its own apparent (non-circulatory) mass `A_UVLM,nc`; to avoid counting it twice the two are combined
+with the **delta method**:
+
+```
+Q(k) from the UVLM table, unchanged        +        ΔA(ω) = A_BEM(ω) − A_UVLM,nc ,  B_BEM(ω)
+```
+
+`A_UVLM,nc` is fitted from the same GAF table (`utl/uvlm_nc_mass.py`). An identity test (putting
+`A_UVLM,nc` back in place of `A_BEM`) must reproduce the UVLM-only result
+(`utl/scan.py <case> delta --a-source uvlm`, `COUPLING/debug/check_hydro_mass_in_pk.py`).
+
+**Flutter solution.** The tracked p-k method (`COUPLING/flutter_solver.py`) follows each branch with
+wet-frequency seeding; the self-consistent scan (`utl/scan.py`) finds every root at every speed
+without a tracker and is the reference when branches cross or merge.
 
 ---
 
@@ -92,7 +145,7 @@ git clone https://github.com/WISDEM/SONATA 9_gitclone
 
 ---
 
-### 2. PanelAero — aerodynamic influence coefficients (DLM)
+### 2. PanelAero — aerodynamic influence coefficients (DLM, legacy)
 
 PanelAero provides the Doublet Lattice Method and Vortex Lattice Method solvers used to precompute the Qjj matrices.  
 Install via pip:
@@ -215,13 +268,14 @@ python utl/plot_vgvf_compare.py runA runB -l A -l B --exp 18.1,6.4 -o compare.pn
         ↓
 3. Structural analysis         Dry natural frequencies and mode shapes
         ↓
-4. (optional) Capytaine BEM    Load precomputed modal added mass & radiation damping
+4. Fluid operators            UVLM GAF table Q(k) (SHARPy, precomputed on the dry modes)
+                               + Capytaine A(ω), B(ω) for water cases (delta method)
         ↓
-5. Build aerodynamic model     Load precomputed aerogrid and Qjj matrices
+5. Aero-structural coupling    modal projection on the common dry-mode basis
         ↓
-6. Aero-structural coupling    Z matrix coupling (beam ↔ aerogrid)
+6. Flutter solver              p-k tracking (or Roger RFA, legacy)
         ↓
-7. Flutter solver              P-K method or Roger RFA eigenvalue sweep
+7. Self-consistent scan        optional, utl/scan.py: all roots at every speed
         ↓
 8. Post-processing             V-g / V-f plots, eigenvalue trajectories
 ```
@@ -232,7 +286,7 @@ python utl/plot_vgvf_compare.py runA runB -l A -l B --exp 18.1,6.4 -o compare.pn
 
 | Case | Type | Fluid | Aerodynamics / hydrodynamics |
 |---|---|---|---|
-| `GOLAND` | literature benchmark, validation | air | DLM or UVLM |
+| `GOLAND` | literature benchmark, validation | air | UVLM (DLM legacy) |
 | `GOLAND_water` | numerical case (submergence sensitivity) | water | UVLM + Capytaine BEM (delta) |
 | `Model2t` | Besch & Liu 1973 experiment, validation | water | UVLM + Capytaine BEM |
 | `TFOIL_SIMPLE` | simplified computational T-foil | water | UVLM + Capytaine BEM (delta) |
@@ -243,7 +297,22 @@ Structural properties are defined in the case config; cases built from SONATA se
 
 ---
 
-## Precomputing Qjj Matrices
+## Precomputing UVLM GAF Tables
+
+Run in the `sharpy` environment, after the dry modes of the case exist:
+
+```bash
+conda run -n sharpy python FLUID/sharpy/gino_bem/precompute_quvlm_goland.py --grid fine           # GOLAND / GOLAND_water
+conda run -n sharpy python FLUID/sharpy/gino_bem/precompute_quvlm.py --case <case> --grid <grid>   # generic cases
+```
+
+The table is written to `FLUID/PanelAero/Qjj/Quvlm_<case>_*.npz` and selected in the case config with
+`aero_method = "UVLM"` and `quvlm_npz_path`. For the whole chain (dry modes → GAF → BEM → A_UVLM,nc →
+scans) see `utl/run_chain.sh`.
+
+---
+
+## Precomputing Qjj Matrices (DLM, legacy)
 
 All cases require precomputed aerodynamic influence coefficient matrices (Qjj). These are **not included** in the repository due to their size and must be computed locally before running `main.py`.
 
@@ -264,7 +333,7 @@ The case config file (`examples/<case_name>/config_<case_name>.py`) specifies wh
 
 ## Precomputing Capytaine BEM Matrices
 
-Water cases can also use Capytaine BEM results for non-circulatory added mass and radiation damping. This is a separate preprocessing workflow from PanelAero.
+Water cases use Capytaine BEM results for added mass, radiation damping and free-surface effects, combined with the UVLM table through the delta method (see [Architecture](#architecture)).
 
 In short:
 
