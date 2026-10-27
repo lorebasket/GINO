@@ -21,32 +21,85 @@
 \babel@aux{italian}{}
 \babel@aux{italian}{}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Riferimento sperimentale}{1}{section.1}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Riferimenti grafici dal paper Abramson e Ransleben (1965).\relax }}{1}{figure.caption.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Riferimenti grafici dal paper Abramson e Ransleben (1965). Nella Figura~5 l'asse $\delta =0$ e' in alto: nel paper i valori stabili positivi compaiono verso il basso ($\delta \approx \SI {4}{\per \second }$ a $V=0$ sulle curve teoriche). Nei grafici numerici si usa la convenzione del codice (radici stabili con $\delta <0$).\relax }}{2}{figure.caption.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {2}Verifica degli input}{2}{section.2}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Confronto tra input del paper e configurazione numerica corrente.\relax }}{2}{table.caption.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {3}Metodo numerico usato nella run corrente}{2}{section.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4}Risultati correnti}{3}{section.4}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Curve $V-\Lambda $, $V-g$ e $V-f$ prodotte dalla run corrente. Il solver individua $V_F=\SI {6.82}{\meter \per \second }=\SI {13.3}{\knunit }$ sulla seconda branca ($f_F\approx \SI {23.1}{\hertz }$).\relax }}{3}{figure.caption.3}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Contributi modali di massa, rigidezza e smorzamento. La convenzione usata nel codice e' $M_\mathrm  {eff}=M_\mathrm  {struct}-M_\mathrm  {aero}+M_\mathrm  {hydro}$, $K_\mathrm  {eff}=K_\mathrm  {struct}-K_\mathrm  {aero}$, $C_\mathrm  {eff}=C_\mathrm  {struct}-C_\mathrm  {aero}+C_\mathrm  {hydro}+C_\mathrm  {emp}$.\relax }}{3}{figure.caption.4}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Confronto tra contributi strutturali modali $(\hat  {C},\hat  {K})$ e valori effettivi dopo il contributo DLM/RFA $(C_\mathrm  {eff},K_\mathrm  {eff})$.\relax }}{3}{figure.caption.5}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Termini di massa aggiunta modale generalizzata usati nella correzione idroelastica ($m_{11}$, $m_{12}$, $m_{21}$, $m_{22}$), confrontati tra Capytaine e strip theory proiettata sugli stessi modi strutturali. I valori sono costanti con $V$ (Capytaine asintotica; strip indipendente dalla velocita'). Non vanno confusi con la massa aggiunta fisica totale dell'ala.\relax }}{4}{figure.caption.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Massa fisica totale, massa strutturale modale e massa aggiunta modale}{4}{subsection.4.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Massa strutturale modale generalizzata ($\hat  {M}$).}{4}{section*.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Massa aggiunta fisica totale (strip theory, moto rigido).}{4}{section*.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Massa aggiunta modale generalizzata (quella nel plot e in $M_\mathrm  {eff}$).}{5}{section*.9}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Massa aggiunta modale $A(\omega )$ da Capytaine (BEM) per due profondita' di immersione. A basse frequenze compaiono piccole oscillazioni; per $\omega \gtrsim \SI {50}{\radian \per \second }$ i termini diagonali convergono ai valori asintotici $A_{11}\approx \SI {1.31}{\kilogram }$, $A_{22}\approx \SI {0.28}{\kilogram }$ usati nel flutter solver. Le due profondita' (\SI {0.0508}{\meter } e \SI {0.052}{\meter }) producono curve quasi sovrapposte.\relax }}{6}{figure.caption.10}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Confronto tra input del paper e configurazione numerica.\relax }}{2}{table.caption.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Selezione dello smorzamento strutturale $\zeta $}{2}{section.3}\protected@file@percent }
+\newlabel{sec:zeta}{{3}{2}{Selezione dello smorzamento strutturale $\zeta $}{section.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Allineamento con la Figura~5.}{3}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Calcolo di $\delta $ dagli autovalori bagnati}{3}{section.4}\protected@file@percent }
+\newlabel{sec:delta}{{4}{3}{Calcolo di $\delta $ dagli autovalori bagnati}{section.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Metodo numerico}{3}{section.5}\protected@file@percent }
+\newlabel{sec:metodo-numerico}{{5}{3}{Metodo numerico}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Modello strutturale e aerodinamica DLM}{3}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Soluzione flutter con massa aggiunta strip}{3}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Metodo PK.}{3}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Metodo Roger RFA.}{3}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Confronto PK+strip vs RFA+strip.}{4}{section*.6}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Flutter PK + strip theory ($\zeta _\mathrm  {str}=0{,}03$, \texttt  {aero\_im\_Q\_scale}=1).\relax }}{4}{figure.caption.7}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{fig:capytaine-added-mass-omega}{{6}{6}{Massa aggiunta modale $A(\omega )$ da Capytaine (BEM) per due profondita' di immersione. A basse frequenze compaiono piccole oscillazioni; per $\omega \gtrsim \SI {50}{\radian \per \second }$ i termini diagonali convergono ai valori asintotici $A_{11}\approx \SI {1.31}{\kilogram }$, $A_{22}\approx \SI {0.28}{\kilogram }$ usati nel flutter solver. Le due profondita' (\SI {0.0508}{\meter } e \SI {0.052}{\meter }) producono curve quasi sovrapposte.\relax }{figure.caption.10}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Smorzamento radiativo modale $B(\omega )$ da Capytaine. I picchi sono concentrati a basse frequenze ($\omega \approx \SI {6}{\radian \per \second }$--\SI {10}{\radian \per \second }); oltre $\omega \approx \SI {25}{\radian \per \second }$ il damping radiativo tende a zero. Nella run corrente il solver usa $B_\infty \approx 0$ (media asintotica ad alta $\omega $), coerente con queste curve nella banda di flutter ($\omega \sim \SI {60}{\radian \per \second }$--\SI {130}{\radian \per \second }).\relax }}{7}{figure.caption.11}\protected@file@percent }
-\newlabel{fig:capytaine-radiation-damping-omega}{{7}{7}{Smorzamento radiativo modale $B(\omega )$ da Capytaine. I picchi sono concentrati a basse frequenze ($\omega \approx \SI {6}{\radian \per \second }$--\SI {10}{\radian \per \second }); oltre $\omega \approx \SI {25}{\radian \per \second }$ il damping radiativo tende a zero. Nella run corrente il solver usa $B_\infty \approx 0$ (media asintotica ad alta $\omega $), coerente con queste curve nella banda di flutter ($\omega \sim \SI {60}{\radian \per \second }$--\SI {130}{\radian \per \second }).\relax }{figure.caption.11}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Riepilogo delle scale di massa per ABRAMSON1965 (primi due modi).\relax }}{7}{table.caption.12}\protected@file@percent }
-\newlabel{tab:mass-scales}{{2}{7}{Riepilogo delle scale di massa per ABRAMSON1965 (primi due modi).\relax }{table.caption.12}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {5}Analisi alternative: PK e strip theory}{7}{section.5}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Analisi PK senza correzione strip theory (run precedente). Il flutter e' stimato intorno a \SI {11.2}{\knunit }; la frequenza del secondo ramo cresce e decresce rapidamente, mentre il primo ramo rimane a frequenze piu' basse. Il grafico log decrement method è altissimo, rispetto a risultati sperimentali.\relax }}{8}{figure.caption.13}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Analisi PK con massa aggiunta da strip theory. L'andamento delle frequenze bagnate è più plausibile, risulta più basso, data la presenza di più massa aggiunta strip, ma il log decrement e il damping mostrano ancora una scala molto alta per validare i risultati. Molto distante dai punti sperimentali di Abramson.\relax }}{8}{figure.caption.14}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces Analisi RFA con massa aggiunta da strip theory. Il flutter viene individuato intorno a \SI {12.6}{\knunit }; anche in questa variante la frequenza bagnata segue un trend regolare, mentre la magnitudine dei decrementi resta il punto critico. Questo plot che coincide con risultato pk, permette di validare metodo RFA.\relax }}{8}{figure.caption.15}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {6}Confronto con figure 5 e 6 ridigitalizzate}{9}{section.6}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces Confronto sul decadimento/log decrement: i punti sperimentali di Abramson sono riportati insieme ai dati branch 1 e branch 2 del pannello $V-\Lambda $ della run corrente, senza applicare ulteriori flip di segno. La seconda branca numerica attraversa lo zero intorno a \SI {13.3}{\knunit }, mentre il riferimento sperimentale arriva a circa \SI {48}{\knunit }.\relax }}{9}{figure.caption.16}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {12}{\ignorespaces Confronto sulla frequenza: l'andamento delle frequenze bagnate e' qualitativamente coerente con il riferimento, in particolare per la branca torsionale, ma l'instabilita' numerica avviene molto prima del punto di rottura misurato.\relax }}{10}{figure.caption.17}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusione}{10}{section.7}\protected@file@percent }
-\gdef \@abspage@last{10}
+\newlabel{fig:pk-strip}{{2}{4}{Flutter PK + strip theory ($\zeta _\mathrm {str}=0{,}03$, \texttt {aero\_im\_Q\_scale}=1).\relax }{figure.caption.7}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Flutter Roger RFA + strip theory (stessi input del pannello PK: $\zeta _\mathrm  {str}=0{,}03$, \texttt  {aero\_im\_Q\_scale}=1).\relax }}{5}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:rfa-strip}{{3}{5}{Flutter Roger RFA + strip theory (stessi input del pannello PK: $\zeta _\mathrm {str}=0{,}03$, \texttt {aero\_im\_Q\_scale}=1).\relax }{figure.caption.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Correzione idroelastica Capytaine (opzionale)}{5}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Smorzamento empirico}{6}{subsection.5.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Risultati numerici: contributi e idrodinamica modale}{6}{section.6}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Contributi modali di massa, rigidezza e smorzamento. Convenzione: $M_\mathrm  {eff}=M_\mathrm  {struct}-M_\mathrm  {aero}+M_\mathrm  {hydro}$, $K_\mathrm  {eff}=K_\mathrm  {struct}-K_\mathrm  {aero}$, $C_\mathrm  {eff}=C_\mathrm  {struct}-C_\mathrm  {aero}+C_\mathrm  {hydro}+C_\mathrm  {emp}$.\relax }}{6}{figure.caption.9}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Contributi strutturali modali $(\hat  {C},\hat  {K})$ e valori effettivi dopo DLM/RFA $(C_\mathrm  {eff},K_\mathrm  {eff})$.\relax }}{6}{figure.caption.10}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Termini di massa aggiunta modale generalizzata ($m_{11}$, $m_{12}$, $m_{21}$, $m_{22}$): confronto tra Capytaine asintotica e strip theory proiettata sugli stessi modi. I valori strip sono costanti con $V$; non vanno confusi con la massa aggiunta fisica totale.\relax }}{7}{figure.caption.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Massa fisica totale, massa strutturale modale e massa aggiunta modale}{7}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Massa strutturale modale generalizzata ($\hat  {M}$).}{7}{section*.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Massa aggiunta fisica totale (strip theory, moto rigido).}{7}{section*.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Massa aggiunta modale generalizzata.}{7}{section*.14}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Massa aggiunta modale $A(\omega )$ da Capytaine per due profondita' di immersione. Per $\omega \gtrsim \SI {50}{\radian \per \second }$ i termini diagonali convergono ai valori asintotici usati nel solver idroelastico.\relax }}{8}{figure.caption.15}\protected@file@percent }
+\newlabel{fig:capytaine-added-mass-omega}{{7}{8}{Massa aggiunta modale $A(\omega )$ da Capytaine per due profondita' di immersione. Per $\omega \gtrsim \SI {50}{\radian \per \second }$ i termini diagonali convergono ai valori asintotici usati nel solver idroelastico.\relax }{figure.caption.15}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Smorzamento radiativo modale $B(\omega )$ da Capytaine. Oltre $\omega \approx \SI {25}{\radian \per \second }$ il damping radiativo tende a zero; nella banda di flutter il solver usa $B_\infty \approx 0$.\relax }}{9}{figure.caption.16}\protected@file@percent }
+\newlabel{fig:capytaine-radiation-damping-omega}{{8}{9}{Smorzamento radiativo modale $B(\omega )$ da Capytaine. Oltre $\omega \approx \SI {25}{\radian \per \second }$ il damping radiativo tende a zero; nella banda di flutter il solver usa $B_\infty \approx 0$.\relax }{figure.caption.16}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Riepilogo delle scale di massa per ABRAMSON1965 (primi due modi).\relax }}{9}{table.caption.17}\protected@file@percent }
+\newlabel{tab:mass-scales}{{2}{9}{Riepilogo delle scale di massa per ABRAMSON1965 (primi due modi).\relax }{table.caption.17}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Confronto quantitativo $\mathrm  {Im}(Q)$ DLM vs coefficienti misurati (curva~3)}{10}{section.7}\protected@file@percent }
+\newlabel{sec:imq-measured}{{7}{10}{Confronto quantitativo $\mathrm {Im}(Q)$ DLM vs coefficienti misurati (curva~3)}{section.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Due percorsi distinti: misura di galleria e DLM}{10}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Coefficienti misurati: come e cosa misura Abramson}{10}{subsection.7.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Esperimento di galleria (Ref.~2--3).}{10}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{I quattro fattori della matrice $H(U)$.}{10}{section*.19}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Coefficienti oscillatori misurati (mid-span, quarto di corda).\relax }}{10}{table.caption.20}\protected@file@percent }
+\newlabel{tab:H-coeffs}{{3}{10}{Coefficienti oscillatori misurati (mid-span, quarto di corda).\relax }{table.caption.20}{}}
+\@writefile{toc}{\contentsline {paragraph}{Uso nel paper 1965.}{11}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Matrice aerodinamica modale del codice (DLM)}{11}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Catena nel solver.}{11}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Significato degli indici $bb$, $pp$, \ldots  }{11}{section*.23}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Corrispondenza indici $Q_\mathrm  {modal}$ e modi strutturali.\relax }}{11}{table.caption.24}\protected@file@percent }
+\newlabel{tab:Q-indices}{{4}{11}{Corrispondenza indici $Q_\mathrm {modal}$ e modi strutturali.\relax }{table.caption.24}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.4}Cosa confrontiamo esattamente nel grafico}{11}{subsection.7.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Quantita' confrontate nella Figura~\ref  {fig:imq-measured}.\relax }}{11}{table.caption.25}\protected@file@percent }
+\newlabel{tab:imq-compare}{{5}{11}{Quantita' confrontate nella Figura~\ref {fig:imq-measured}.\relax }{table.caption.25}{}}
+\@writefile{toc}{\contentsline {paragraph}{Convenzione di frequenza ridotta.}{12}{section*.26}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Calibrazione delle unita' (proxy $Q_{bb,\mathrm  {meas}}$).}{12}{section*.27}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Estensione prevista.}{12}{section*.28}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.5}Corrispondenze fisiche e limiti del confronto}{12}{subsection.7.5}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Cosa e' analogo e cosa differisce tra misura Abramson e DLM.\relax }}{12}{table.caption.29}\protected@file@percent }
+\newlabel{tab:analogy-limits}{{6}{12}{Cosa e' analogo e cosa differisce tra misura Abramson e DLM.\relax }{table.caption.29}{}}
+\@writefile{toc}{\contentsline {paragraph}{Collegamento con $C_\mathrm  {aero}$ e flutter.}{12}{section*.30}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Risultato principale (da \texttt  {ABRAMSON1965\_qmodal\_bend\_pitch.csv}).}{13}{section*.31}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Confronto $\mathrm  {Im}(Q_{bb})$ (scala lineare): DLM vs curva~3 calibrata a $U=1$. Destra: $|\mathrm  {Im}(Q_\mathrm  {DLM})|/|\mathrm  {Im}(Q_\mathrm  {meas})|$ vs $V$ (scala lineare); picco $\sim 10$ per $V<\SI {6}{\meter \per \second }$.\relax }}{13}{figure.caption.32}\protected@file@percent }
+\newlabel{fig:imq-measured}{{9}{13}{Confronto $\mathrm {Im}(Q_{bb})$ (scala lineare): DLM vs curva~3 calibrata a $U=1$. Destra: $|\mathrm {Im}(Q_\mathrm {DLM})|/|\mathrm {Im}(Q_\mathrm {meas})|$ vs $V$ (scala lineare); picco $\sim 10$ per $V<\SI {6}{\meter \per \second }$.\relax }{figure.caption.32}{}}
+\@writefile{toc}{\contentsline {paragraph}{Script e dati.}{14}{section*.33}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Interpretazione e sintesi.}{14}{section*.34}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}RFA + Capytaine (run recente)}{14}{section.8}\protected@file@percent }
+\newlabel{sec:rfa-capy}{{8}{14}{RFA + Capytaine (run recente)}{section.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Flutter numerico aggiornato (RFA+strip, $\zeta =0{,}03$, \texttt  {aero\_im\_Q\_scale}=1).\relax }}{14}{table.caption.35}\protected@file@percent }
+\newlabel{tab:flutter-recent}{{7}{14}{Flutter numerico aggiornato (RFA+strip, $\zeta =0{,}03$, \texttt {aero\_im\_Q\_scale}=1).\relax }{table.caption.35}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Scala dello smorzamento idrodinamico $\mathrm  {Im}(Q_{jj})$}{14}{section.9}\protected@file@percent }
+\newlabel{sec:imq-scale}{{9}{14}{Scala dello smorzamento idrodinamico $\mathrm {Im}(Q_{jj})$}{section.9}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces RFA+strip, \texttt  {aero\_im\_Q\_scale = 0.5}: $V_f\approx \SI {18.1}{\knunit }$ sulla branca~2.\relax }}{15}{figure.caption.36}\protected@file@percent }
+\newlabel{fig:imq-05}{{10}{15}{RFA+strip, \texttt {aero\_im\_Q\_scale = 0.5}: $V_f\approx \SI {18.1}{\knunit }$ sulla branca~2.\relax }{figure.caption.36}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces RFA+strip, \texttt  {aero\_im\_Q\_scale = 0.4}: $V_f\approx \SI {31.2}{\knunit }$ sulla branca~2.\relax }}{16}{figure.caption.37}\protected@file@percent }
+\newlabel{fig:imq-04}{{11}{16}{RFA+strip, \texttt {aero\_im\_Q\_scale = 0.4}: $V_f\approx \SI {31.2}{\knunit }$ sulla branca~2.\relax }{figure.caption.37}{}}
+\@writefile{toc}{\contentsline {paragraph}{Discussione.}{16}{section*.38}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {10}Confronto con Figure~5 e~6 ridigitalizzate}{16}{section.10}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {12}{\ignorespaces Confronto $\delta (V)$: dati e curva~3 ridigitalizzati vs RFA+strip ($\zeta =0{,}03$, \texttt  {aero\_im\_Q\_scale}=0.5).\relax }}{17}{figure.caption.39}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {13}{\ignorespaces Confronto frequenza accoppiata.\relax }}{17}{figure.caption.40}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Riepilogo flutter (branca instabile, RFA + strip, $\zeta =0{,}03$).\relax }}{17}{table.caption.41}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}Conclusioni}{18}{section.11}\protected@file@percent }
+\gdef \@abspage@last{18}

@@ -26,16 +26,11 @@ def rotate_beam_model_y(beam_model, angle_deg):
         pos = np.array(node["position"])
         node["position"] = (R @ pos).tolist()
 
-    # 2. Rotate all per-element K and M matrices
+    # 2. Rotate global section matrices and update T6 (keep local K/M unchanged)
     T = get_T6_y(angle_deg)
-    for elem in beam_model["elements"]:
-        # Defensive: ensure arrays and correct shape
-        K = np.array(elem["stiffness"], dtype=float)
-        M = np.array(elem["mass"], dtype=float)
-        assert K.shape == (6, 6), "K must be 6x6"
-        assert M.shape == (6, 6), "M must be 6x6"
-        elem["stiffness"] = T @ K @ T.T
-        elem["mass"] = T @ M @ T.T
+    from FEA.fea_utl.multibody_assembly import compose_T6_on_beam_model
+
+    compose_T6_on_beam_model(beam_model, T)
 
     return beam_model
 

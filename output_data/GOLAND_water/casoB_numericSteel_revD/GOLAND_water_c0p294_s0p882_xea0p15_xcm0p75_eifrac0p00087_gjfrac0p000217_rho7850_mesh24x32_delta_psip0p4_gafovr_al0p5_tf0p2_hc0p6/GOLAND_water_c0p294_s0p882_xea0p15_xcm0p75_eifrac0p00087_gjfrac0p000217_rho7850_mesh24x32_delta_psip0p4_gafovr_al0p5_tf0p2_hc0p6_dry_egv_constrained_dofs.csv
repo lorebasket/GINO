@@ -1,0 +1,2 @@
+Node_Index,Constrained_DOF_Indices,X_coord_m,Y_coord_m,Z_coord_m,DOF_Type
+0,"0,1,2,3,4,5",0.00000000,0.00000000,0.00000000,"Ux,Uy,Uz,Rx,Ry,Rz"

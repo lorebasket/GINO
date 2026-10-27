@@ -10,8 +10,7 @@ def _save_global_matrix_to_csv(M_global, config):
     
     print(f"\n*** Saving global K and M matrices to CSV files ***")
     
-    # Create output directory: output_data/{config_name}/
-    output_dir = os.path.join(config.output_dir, config.name)
+    output_dir = config.output_dir
     os.makedirs(output_dir, exist_ok=True)
     
     config_name = config.name
@@ -29,7 +28,7 @@ def _save_global_matrix_to_csv(M_global, config):
     
     print(f"  Output directory: {output_dir}\n")
 
-def calculate_shape_functions(x, L):
+def calculate_shape_functions(x, L, physical=False):
     """
     Calculate the shape function matrix N for a 2-node beam element aligned along Y.
     DOF ordering (per node): [u, v, w, θx, θy, θz]
@@ -106,10 +105,17 @@ def calculate_shape_functions(x, L):
     N_matrix[5, 6]  = dH3_dx    # from u2
     N_matrix[5, 11] = dH4_dx    # from θz2
 
+    if physical:
+        # rotazioni fisiche (mano destra), come in global_stiffness.calculate_B_matrix:
+        # u ha pendenza -θz, e θz = -du/dy; w ha pendenza +θx (gia' cosi')
+        N_matrix[0, 5] = -H2; N_matrix[0, 11] = -H4
+        N_matrix[5, 0] = -dH1_dx; N_matrix[5, 5] = dH2_dx
+        N_matrix[5, 6] = -dH3_dx; N_matrix[5, 11] = dH4_dx
+
     return N_matrix
 
 
-def calculate_element_mass_matrix(element_mass, L):
+def calculate_element_mass_matrix(element_mass, L, physical=False):
     """
     Compute a consistent 12x12 element mass matrix:
         M_e = ∫_0^L N^T * element_mass * N dx
@@ -128,7 +134,7 @@ def calculate_element_mass_matrix(element_mass, L):
     for xi, w in zip(gauss_points, gauss_weights):
         # map xi in [-1,1] to x in [0,L] : x = (L/2)*(xi + 1)
         x = 0.5 * L * (xi + 1.0)
-        N = calculate_shape_functions(x, L)   # 6 x 12
+        N = calculate_shape_functions(x, L, physical)   # 6 x 12
         integrand = N.T @ element_mass @ N    # 12 x 12
         M_element += integrand * w * (L/2.0)  # Jacobian factor L/2
 
@@ -161,7 +167,8 @@ def assemble_global_mass_matrix(beam_model, config):
         T6 = T6_for_element(element, nodes)
         m_local = T6.T @ element_mass @ T6
 
-        M_e = calculate_element_mass_matrix(m_local, L)  # 12x12 in local frame
+        M_e = calculate_element_mass_matrix(
+            m_local, L, bool(getattr(config, "beam_rotations_physical", False)))  # 12x12 in local frame
 
         T12 = np.zeros((12, 12), dtype=float)
         T12[:6, :6] = T6

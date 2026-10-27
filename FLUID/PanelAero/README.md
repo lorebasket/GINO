@@ -2,7 +2,11 @@
 
 > **Dependency:** `DLM` and `VLM` are provided by the [`PanelAero`](https://github.com/DLR-AE/PanelAero) package (installed via `pip install PanelAero` in the `sonata-env` conda environment). Do not copy those files locally.
 
-This module builds the aero/hydro-dynamic panel grid and precomputes the **Qjj matrices** (generalised aero/hydro-dynamic force matrices) using the **Doublet Lattice Method (DLM)** or the **Vortex Lattice Method (VLM)**. These matrices are stored on disk and loaded at runtime by `main.py` during the flutter analysis.
+This module builds the aero/hydro-dynamic panel grid and precomputes the **generalised
+force matrices** using the **Doublet Lattice Method (DLM)** or the **Vortex Lattice Method
+(UVLM)**. DLM outputs are stored as `Qjj`; UVLM outputs as `Quvlm` / Krylov ROM files.
+These matrices are loaded at runtime by `main.py` according to each case's `aero_source`
+and directory settings.
 
 For water cases that use the Capytaine Boundary Element Method (BEM) correction, PanelAero still provides the circulatory DLM/VLM contribution while `FLUID/capytaine/` provides the non-circulatory added-mass and radiation-damping matrices. See [`../capytaine/README.md`](../capytaine/README.md) for that workflow.
 
@@ -144,4 +148,5 @@ precompute_qjj_grid(..., resume=True, verify_existing=True, ...)
 - The `qjj_precomputed/` output folder is **not uploaded** to the repository (excluded via `.gitignore`) due to its large size. It must be recomputed locally.
 - The DLM implementation follows Rodden's formulation. The `quartic` method (Rodden 1998) is recommended for production runs; `parabolic` (Rodden 1971/72) is faster but less accurate at high reduced frequencies.
 - CAERO1 card files generated during aerogrid construction are saved in `panelaero_utl/CAERO1_cards/`.
-- Capytaine BEM validation is under development; the current Abramson comparison is documented in [`../../docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf`](../../docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf).
+- For UVLM cases, set `VLM = True` in `executer.py` and point the case config to the
+  corresponding `Quvlm_*.npz` output folder.

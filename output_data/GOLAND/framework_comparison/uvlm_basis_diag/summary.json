@@ -1,0 +1,130 @@
+{
+  "dry_parity": [
+    {
+      "mode": 1,
+      "f_gino_Hz": 7.721603302796447,
+      "f_sharpy_Hz": 7.650252,
+      "df_pct": 0.9326660454642041,
+      "twist_sign": 1.0,
+      "MAC_full": 0.0,
+      "MAC_w": 0.0,
+      "MAC_th": 0.0,
+      "c_w_lsq": 0.0,
+      "c_full_lsq": 0.0,
+      "tip_w_gino_over_sh": NaN,
+      "tip_th_gino_over_sh": NaN
+    },
+    {
+      "mode": 2,
+      "f_gino_Hz": 15.239901920540815,
+      "f_sharpy_Hz": 15.228653,
+      "df_pct": 0.07386681238856713,
+      "twist_sign": 1.0,
+      "MAC_full": 0.0,
+      "MAC_w": 0.0,
+      "MAC_th": 0.0,
+      "c_w_lsq": 0.0,
+      "c_full_lsq": 0.0,
+      "tip_w_gino_over_sh": NaN,
+      "tip_th_gino_over_sh": NaN
+    },
+    {
+      "mode": 3,
+      "f_gino_Hz": 38.798897395472316,
+      "f_sharpy_Hz": 38.697562,
+      "df_pct": 0.26186506393432,
+      "twist_sign": 1.0,
+      "MAC_full": 0.0,
+      "MAC_w": 0.0,
+      "MAC_th": 0.0,
+      "c_w_lsq": 0.0,
+      "c_full_lsq": 0.0,
+      "tip_w_gino_over_sh": NaN,
+      "tip_th_gino_over_sh": NaN
+    },
+    {
+      "mode": 4,
+      "f_gino_Hz": 55.05900617871307,
+      "f_sharpy_Hz": 54.717662999999995,
+      "df_pct": 0.6238263112828347,
+      "twist_sign": -1.0,
+      "MAC_full": 0.9222308414552046,
+      "MAC_w": 0.9999968999371234,
+      "MAC_th": 0.8952203673382787,
+      "c_w_lsq": -1.0006799530554216,
+      "c_full_lsq": -0.8640639915976446,
+      "tip_w_gino_over_sh": -0.9990788705830034,
+      "tip_th_gino_over_sh": -0.46438544915945307
+    }
+  ],
+  "dry_quvlm_source": [
+    {
+      "mode": 1,
+      "f_gino_Hz": 7.846447841298864,
+      "f_sharpy_Hz": 7.650252,
+      "df_pct": 2.564567040391132,
+      "twist_sign": 1.0,
+      "MAC_full": 0.0,
+      "MAC_w": 0.0,
+      "MAC_th": 0.0,
+      "c_w_lsq": 0.0,
+      "c_full_lsq": 0.0,
+      "tip_w_gino_over_sh": NaN,
+      "tip_th_gino_over_sh": NaN
+    },
+    {
+      "mode": 2,
+      "f_gino_Hz": 15.259947055904892,
+      "f_sharpy_Hz": 15.228653,
+      "df_pct": 0.20549457594767334,
+      "twist_sign": 1.0,
+      "MAC_full": 0.0,
+      "MAC_w": 0.0,
+      "MAC_th": 0.0,
+      "c_w_lsq": 0.0,
+      "c_full_lsq": 0.0,
+      "tip_w_gino_over_sh": NaN,
+      "tip_th_gino_over_sh": NaN
+    },
+    {
+      "mode": 3,
+      "f_gino_Hz": 38.97417680172213,
+      "f_sharpy_Hz": 38.697562,
+      "df_pct": 0.7148119608210401,
+      "twist_sign": 1.0,
+      "MAC_full": 0.0,
+      "MAC_w": 0.0,
+      "MAC_th": 0.0,
+      "c_w_lsq": 0.0,
+      "c_full_lsq": 0.0,
+      "tip_w_gino_over_sh": NaN,
+      "tip_th_gino_over_sh": NaN
+    },
+    {
+      "mode": 4,
+      "f_gino_Hz": 55.688654819742226,
+      "f_sharpy_Hz": 54.717662999999995,
+      "df_pct": 1.774549142828392,
+      "twist_sign": -1.0,
+      "MAC_full": 0.915784952844123,
+      "MAC_w": 0.9999775615756306,
+      "MAC_th": 0.8871479129278675,
+      "c_w_lsq": 1.0013328229174934,
+      "c_full_lsq": 0.8512048067934153,
+      "tip_w_gino_over_sh": 0.9971502583479575,
+      "tip_th_gino_over_sh": 0.4095097271383548
+    }
+  ],
+  "note_basis_mismatch": "Quvlm was built from output_data/GOLAND/GOLAND_dry_egv_*.csv (bend 7.846 Hz), while current gino_uvlm run uses bend 7.722 Hz \u2014 possible basis drift.",
+  "quvlm": {
+    "path": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/FLUID/PanelAero/Qjj/Quvlm_GOLAND_air_M16N32Ms10_nm4_krylov_wlsq.npz",
+    "projection": "w_lsq",
+    "C_diag": [
+      1.406692172771838,
+      -1.4392961959966941,
+      -1.3273701497002448,
+      1.4195008444434183
+    ],
+    "surface_factor": 0.5
+  }
+}

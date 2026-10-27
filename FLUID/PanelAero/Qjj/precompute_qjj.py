@@ -268,16 +268,72 @@ def _bracket(arr, x):
     t = (x - arr[i0]) / (arr[i1] - arr[i0])
     return i0, i1, float(t)
 
-def interp_qjj_from_disk_old(root, k_query, Ma_query, mmap=True):
+def _nearest_index(arr, x):
+    """Return nearest index to x in arr."""
+    idx = int(np.searchsorted(arr, x))
+    if idx <= 0:
+        return 0
+    if idx >= len(arr):
+        return len(arr) - 1
+    return idx if abs(arr[idx] - x) < abs(arr[idx - 1] - x) else idx - 1
+
+
+def _bracket_unique(arr, x):
     """
-    Interpola bilinearmente Qjj in (k, Ma)
+    Same as _bracket, but robust to repeated values in arr.
+    Returns indices in the ORIGINAL array.
+    """
+    vals, first_idx = np.unique(np.asarray(arr, dtype=float), return_index=True)
+    if vals.size == 0:
+        return 0, 0, 0.0
+    if vals.size == 1:
+        i = int(first_idx[0])
+        return i, i, 0.0
+    u0, u1, t = _bracket(vals, x)
+    return int(first_idx[u0]), int(first_idx[u1]), float(t)
+
+
+def interp_qjj_from_disk_old(
+    root,
+    k_query,
+    Ma_query,
+    mmap=True,
+    *,
+    ma_interp_mode="bilinear",
+    ma_low_threshold=0.05,
+):
+    """
+    Interpola Qjj in (k, Ma) caricando solo i vicini necessari.
+
+    Parameters
+    ----------
+    ma_interp_mode : str
+        - "bilinear": standard bilinear interpolation on (k, Ma)
+        - "nearest": use nearest Ma slice and interpolate only in k
+        - "auto": if max(Ma_query, max(Ma_list)) <= ma_low_threshold, use "nearest",
+                  otherwise use "bilinear"
     """
     meta = _load_index_old(root)
     k_list, Ma_list = meta["k_list"], meta["Ma_list"]
     dtype = meta["dtype"]
 
-    j0, j1, tk = _bracket(k_list, k_query)
-    i0, i1, tm = _bracket(Ma_list, Ma_query)
+    j0, j1, tk = _bracket_unique(k_list, k_query)
+
+    mode = str(ma_interp_mode).lower()
+    if mode not in {"bilinear", "nearest", "auto"}:
+        raise ValueError(
+            f"Unsupported ma_interp_mode='{ma_interp_mode}'. "
+            "Use one of: 'bilinear', 'nearest', 'auto'."
+        )
+    if mode == "auto":
+        ma_max = float(np.max(Ma_list)) if len(Ma_list) else float(Ma_query)
+        mode = "nearest" if max(float(Ma_query), ma_max) <= float(ma_low_threshold) else "bilinear"
+
+    if mode == "nearest":
+        i0 = i1 = _nearest_index(Ma_list, Ma_query)
+        tm = 0.0
+    else:
+        i0, i1, tm = _bracket_unique(Ma_list, Ma_query)
 
     # Carica solo i vicini necessari
     R00 = _load_slice_old(meta["root"], j0, i0, "real", mmap, dtype)

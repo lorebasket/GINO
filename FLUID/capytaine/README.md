@@ -50,16 +50,16 @@ cases such as `NACA0003` and `ABRAMSON1965`.
 The script:
 
 1. Loads the case configuration with `examples/config.py`.
-2. Reads the closed airfoil section from `cfg.raw`.
-3. Resamples the section if `mesh_n_chord` or `--n-chord` is provided.
-4. Scales the section by `cfg.chord` and shifts the elastic-axis position by
-   `cfg.xea_factor * chord`.
-5. Extrudes the section along the beam span with Gmsh.
-6. Loads the generated surface mesh into Capytaine.
-7. Applies the same geometric rotations used by the structural/aerodynamic model:
-   pitch about `+X`, angle of attack about `+Y`, and dihedral about `+Y`.
-8. Exports the mesh, by default to
-   `FLUID/capytaine/<case>/<case>_mesh.vtu`.
+2. Reads the closed airfoil section from `cfg.raw` and fits a **periodic spline**.
+3. Places the same section at `Y = 0` and `Y = beam_length`, then **lofts** the skin along
+   the straight beam axis.
+4. Meshes the closed hull (default: structured conformal quads; optional Gmsh OCC loft).
+5. Applies the same geometric rotations as the structural model (structural dihedral / α / wing dihedral).
+6. Exports the mesh, by default to `FLUID/capytaine/<case>/<case>_mesh.vtu`.
+
+Hydro mesh density (`mesh_n_span`, `mesh_n_chord` in the case config) is independent of
+PanelAero `nspan` / `nchord`; refine until Capytaine `A(ω)`, `B(ω)` converge for your
+`omega_list`.
 
 Typical usage from the repository root:
 
@@ -69,10 +69,12 @@ python FLUID/capytaine/build_capytaine_mesh.py --case_name ABRAMSON1965
 
 Useful options:
 
-- `--n-span`: override spanwise mesh segments.
-- `--n-chord`: override the number of perimeter points used on the section.
-- `--gmsh-lc`: set the Gmsh characteristic length manually.
-- `--pitch`: override `config.pitch`.
+- `--generator loft` (default): structured spline loft, conformal quads, no Gmsh required.
+- `--generator gmsh`: Gmsh OCC spline loft + triangle surface mesh.
+- `--n-span`: spanwise mesh segments.
+- `--n-perimeter`: nodes around the section spline (default from `mesh_n_chord`).
+- `--mesh-lc`: target Gmsh edge length (`--generator gmsh` only).
+- `--dihedral`: override `config.dihedral_angle`.
 - `--offset-z`: translate the hull in `Z` after meshing. The default is zero so the
   hull remains aligned with the beam frame.
 - `--use-config-offset-z`: use `config.offset_z` instead of `--offset-z`.
@@ -135,8 +137,13 @@ Useful options:
 - `--rigid-body`: use Capytaine's six rigid-body DOFs instead of modal DOFs.
 - `--depth`: override the config depth list with a single value.
 - `--omega-list`: override `cfg.omega_list`.
-- `--raw-eigenvector`: use the raw mass-normalized eigenvectors instead of normalized
-  mode shapes.
+- `--raw-eigenvector`: skip eigenvector rescaling (same as `--phi-normalization none`).
+- `--phi-normalization geometric|translation|none`: how beam modes are scaled before the
+  face map. Default `geometric` divides each eigenvector by max|phi| (all 6 DOFs) so
+  Capytaine sees O(1) boundary motion; `added_mass` / `added_damping` in the NPZ are
+  converted back to the mass-normalized modal basis via A_ij *= s_i s_j (s = max|phi| before
+  scaling). `translation` uses max(|Ux|,|Uy|,|Uz|) only. `none` keeps FEM eigenvectors as-is
+  (legacy; often underestimates added mass when max|phi| ≪ 1 m).
 - `--plot-mode-projection-debug`: save one plot per mode showing the mapped face
   displacement field on the mesh.
 - `--no-plots`: skip matrix sweep plots.
@@ -159,9 +166,6 @@ python main.py ABRAMSON1965
 
 ## Validation Status
 
-The Capytaine BEM implementation is still under development and should be treated as a
-work-in-progress validation path. Current comparisons and validation notes are collected
-in the Abramson benchmark report:
-
-- [`docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf`](../../docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf)
-- [`docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.tex`](../../docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.tex)
+The Capytaine BEM workflow is actively used for water-case benchmarks (Abramson 1965,
+Model 2T, and related cases). Treat BEM results as part of an evolving validation path and
+compare against strip-theory or measured data where available.

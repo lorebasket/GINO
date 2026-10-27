@@ -39,9 +39,7 @@ def _save_modal_data_to_csv(beam_model, total_dof, constrained_dofs, dry_values,
     
     print(f"\n*** Saving modal data to CSV files ***")
     
-    # Get output directory
     output_dir = getattr(config, 'output_dir', '.')
-    output_dir = os.path.join(output_dir, f"{config.name}")
     os.makedirs(output_dir, exist_ok=True)
     config_name = config.name
     
@@ -295,7 +293,9 @@ def solve_static_analysis(K_global, M_global, force_vector, total_dof, config, b
     _M_scale = np.linalg.norm(M_constrained, 'fro')
     _eps_reg  = 1e-10 * (_M_scale if _M_scale > 0 else 1.0)
     M_constrained_reg = M_constrained + _eps_reg * np.eye(M_constrained.shape[0])
-    dry_values, dry_vectors = eigh(K_constrained, M_constrained_reg)
+    # driver='gv': il default 'gvd' (divide & conquer) con autovettori perde modi quando M e'
+    # quasi singolare (link rigidi senza massa): TNZ dava 9.55 Hz al posto di 3.55 e 21.7.
+    dry_values, dry_vectors = eigh(K_constrained, M_constrained_reg, driver='gv')
     
     # Sort by eigenvalue magnitude and select first num_modes
     idx = np.argsort(np.abs(dry_values))[:num_modes]
@@ -313,19 +313,41 @@ def solve_static_analysis(K_global, M_global, force_vector, total_dof, config, b
 
 
 def compute_rayleigh_ab_from_targets(omega1, omega2, zeta1, zeta2, cond_limit=1e12):
-    A = np.array([[1.0/(2.0*omega1), omega1/2.0],
-                  [1.0/(2.0*omega2), omega2/2.0]], dtype=float)
-    b = np.array([zeta1, zeta2], dtype=float)
-    bad = (not np.all(np.isfinite(A))) or (min(abs(omega1), abs(omega2)) < 1e-12)
-    
-    if not bad:
+    """Solve for (alpha, beta) matching zeta at exactly two frequencies."""
+    return compute_rayleigh_ab_from_modes(
+        (omega1, omega2), (zeta1, zeta2), cond_limit=cond_limit
+    )
+
+
+def compute_rayleigh_ab_from_modes(omegas, zetas, cond_limit=1e12):
+    """
+    Fit Rayleigh coefficients C = alpha*M + beta*K.
+
+    For each mode: zeta_i = alpha/(2*omega_i) + beta*omega_i/2.
+    Two modes → exact solve; more modes → least squares.
+    """
+    omegas = np.asarray(omegas, dtype=float)
+    zetas = np.asarray(zetas, dtype=float)
+    if omegas.shape != zetas.shape or omegas.ndim != 1:
+        raise ValueError("omegas and zetas must be 1-D arrays of equal length")
+    n = len(omegas)
+    if n < 1:
+        raise ValueError("At least one (omega, zeta) pair is required")
+    if np.any(omegas <= 1e-12):
+        raise ValueError("All Rayleigh target frequencies must be positive")
+
+    if n == 1:
+        w = omegas[0]
+        return 2.0 * zetas[0] * w, 0.0
+
+    A = np.column_stack([1.0 / (2.0 * omegas), omegas / 2.0])
+    b = zetas
+    if n == 2 and np.all(np.isfinite(A)):
         try:
             if np.linalg.cond(A) <= cond_limit:
                 return np.linalg.solve(A, b)
         except Exception:
             pass
-    # fall back to least squares
-    
     return np.linalg.lstsq(A, b, rcond=None)[0]
 
 
@@ -351,38 +373,72 @@ def _pick_two_distinct_omegas(omegas, tol_rel=1e-3, eps=1e-10):
     return idx[0], idx[1]
 
 
-def rayleigh_from_two_modes(K_ff, M_ff,
-                            dry_vectors, dry_eigvals,
-                            target_mode_ids=(0, 5),
-                            target_zetas=(0.1, 0.1),
-                            verbose=True):
+def rayleigh_from_modes(K_ff, M_ff,
+                        dry_vectors, dry_eigvals,
+                        target_mode_ids=(0, 5),
+                        target_zetas=(0.1, 0.1),
+                        verbose=True):
+    """
+    Build global Rayleigh damping from dry modal targets.
 
-    # Get the two target modes
-    i, j = target_mode_ids
-    use_pair = (max(i, j) < len(dry_eigvals) and
-                min(dry_eigvals[i], dry_eigvals[j]) > 1e-10 and
-                abs(dry_eigvals[i] - dry_eigvals[j]) / max(dry_eigvals[i], dry_eigvals[j]) > 1e-3)
+    target_mode_ids and target_zetas must have the same length (typically
+    num_modes_flutter_egv). Two targets use an exact 2×2 solve; more targets
+    use least squares on zeta_i = alpha/(2ω_i) + β ω_i/2.
+    """
+    mode_ids = tuple(int(i) for i in np.atleast_1d(target_mode_ids))
+    zetas = tuple(float(z) for z in np.atleast_1d(target_zetas))
+    if len(mode_ids) != len(zetas):
+        raise ValueError(
+            f"rayleigh mode count ({len(mode_ids)}) must match zeta count ({len(zetas)})"
+        )
 
-    if not use_pair:
-        if verbose:
-            print("[Rayleigh] Requested mode pair invalid or nearly equal; auto-selecting.")
+    if len(mode_ids) == 2:
+        i, j = mode_ids
+        use_pair = (max(i, j) < len(dry_eigvals) and
+                    min(dry_eigvals[i], dry_eigvals[j]) > 1e-10 and
+                    abs(dry_eigvals[i] - dry_eigvals[j]) / max(dry_eigvals[i], dry_eigvals[j]) > 1e-3)
+        if not use_pair:
+            if verbose:
+                print("[Rayleigh] Requested mode pair invalid or nearly equal; auto-selecting.")
+            i, j = _pick_two_distinct_omegas(dry_eigvals)
+        mode_ids = (i, j)
+
+    omegas = []
+    for mid in mode_ids:
+        if mid < 0 or mid >= len(dry_eigvals):
+            raise ValueError(f"Rayleigh mode id {mid} out of range (n_modes={len(dry_eigvals)})")
+        ev = dry_eigvals[mid]
+        if ev <= 1e-10:
+            raise ValueError(f"Rayleigh mode {mid} has non-positive eigenvalue {ev}")
+        omegas.append(np.sqrt(ev))
+    omegas = np.asarray(omegas, dtype=float)
+    zetas_arr = np.asarray(zetas[:len(mode_ids)], dtype=float)
+
+    if len(omegas) < 2:
         i, j = _pick_two_distinct_omegas(dry_eigvals)
+        mode_ids = (i, j)
+        omegas = np.array([np.sqrt(dry_eigvals[i]), np.sqrt(dry_eigvals[j])])
+        zetas_arr = np.asarray(zetas[:2], dtype=float)
 
-    # Get the frequencies (rad/s) from eigenvalues (omega^2)
-    omega1 = np.sqrt(dry_eigvals[i])
-    omega2 = np.sqrt(dry_eigvals[j])
-    zeta1, zeta2 = target_zetas
-    
-    # Compute alpha and beta for the full system
-    alpha, beta = compute_rayleigh_ab_from_targets(omega1, omega2, zeta1, zeta2)
-    
-    # Create the full damping matrix
+    alpha, beta = compute_rayleigh_ab_from_modes(omegas, zetas_arr)
     C_global = alpha * M_ff + beta * K_ff
 
     if verbose:
-        print(f"[Rayleigh] using modes {i} & {j}: w1={omega1:.6f}, w2={omega2:.6f}; alpha={alpha:.3e}, beta={beta:.3e}")
+        fit = "exact 2-mode" if len(omegas) == 2 else f"LSQ over {len(omegas)} modes"
+        print(f"[Rayleigh] {fit}: alpha={alpha:.3e}, beta={beta:.3e}")
+        for mid, w, z_tgt in zip(mode_ids, omegas, zetas_arr):
+            z_ach = alpha / (2.0 * w) + beta * w / 2.0
+            print(
+                f"  mode {mid}: omega={w:.6f} rad/s, "
+                f"zeta_target={z_tgt:.4g}, zeta_achieved={z_ach:.4g}"
+            )
 
-    return C_global, alpha, beta, (omega1, omega2)
+    return C_global, alpha, beta, tuple(float(w) for w in omegas)
+
+
+def rayleigh_from_two_modes(K_ff, M_ff, dry_vectors, dry_eigvals, **kwargs):
+    """Backward-compatible alias for two-mode Rayleigh damping."""
+    return rayleigh_from_modes(K_ff, M_ff, dry_vectors, dry_eigvals, **kwargs)
 
 
 def extract_displacements(u_full, n_nodes, dof_per_node=6):

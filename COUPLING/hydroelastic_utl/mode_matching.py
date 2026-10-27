@@ -4,6 +4,14 @@ import numpy as np
 _PERFECT_MAC_ATOL = 1e-6
 
 
+def physical_omega_min(omega_n, frac=0.1):
+    """Minimum oscillatory ω [rad/s] for PK wet-root candidates (drops ω≈0 artefacts)."""
+    omega_n = np.asarray(omega_n, dtype=float).ravel()
+    if omega_n.size == 0:
+        return 1.0
+    return max(float(frac) * float(np.min(omega_n[omega_n > 0])), 1.0)
+
+
 def _apply_inter_mode_separation(lower_bound, upper_bound, s, converged_omegas_at_V,
                                  freq_margin):
     """Tighten frequency window using already-converged modes at the current V."""
@@ -14,6 +22,21 @@ def _apply_inter_mode_separation(lower_bound, upper_bound, s, converged_omegas_a
         upper_bound = min(upper_bound,
                           converged_omegas_at_V[s] * (1 + 2 * freq_margin))
     return lower_bound, upper_bound
+
+
+def _repair_frequency_window(lower_bound, upper_bound, omega_ref, *, omega_phys_min=0.0):
+    """Ensure a valid search band; recentre if inter-mode tightening inverts bounds."""
+    if lower_bound <= upper_bound:
+        return lower_bound, upper_bound, omega_ref
+    lo = max(float(omega_phys_min), float(omega_ref) * 0.8)
+    hi = float(omega_ref) * 1.2
+    if lo > hi:
+        hi = lo * 1.05
+    print(
+        f"      Inter-mode bounds inverted [{lower_bound:.3f}, {upper_bound:.3f}] "
+        f"→ recentred [{lo:.3f}, {hi:.3f}] rad/s around ω={omega_ref:.3f}"
+    )
+    return lo, hi, float(omega_ref)
 
 
 def _unclaimed_root_mask(
@@ -56,6 +79,57 @@ def _unclaimed_root_mask(
         mask &= np.abs(omegas - om_c) >= thresh
 
     return mask
+
+
+def select_pk_mode_frequency_continuity(
+    vals,
+    vecs,
+    omegas,
+    omega_track,
+    prev_vec=None,
+    prev_p=None,
+    freq_tol=0.08,
+):
+    """
+    Pietro ``flutter_tools.track_modes`` root pick: wet root whose |ω| is closest
+    to the tracking frequency (previous velocity or last PK iterate).
+
+    When several roots lie within ``freq_tol`` of ``omega_track`` (typical near
+    coalescence), break ties with MAC to ``prev_vec`` and/or proximity of ``p``
+    to ``prev_p`` so the track does not hop onto the partner branch.
+    """
+    omegas = np.asarray(omegas, dtype=float).ravel()
+    vals = np.asarray(vals)
+    vecs = np.asarray(vecs)
+    if omegas.size == 0 or not np.isfinite(omega_track) or float(omega_track) <= 0.0:
+        return None, None, None
+
+    omega_track = float(omega_track)
+    rel = np.abs(omegas - omega_track) / max(omega_track, 1e-12)
+    near = np.where(np.isfinite(rel) & (rel <= float(freq_tol)))[0]
+    if near.size == 0:
+        j_sel = int(np.argmin(np.abs(omegas - omega_track)))
+        return vals[j_sel], vecs[:, j_sel], j_sel
+
+    if near.size == 1:
+        j = int(near[0])
+        return vals[j], vecs[:, j], j
+
+    scores = []
+    for j in near:
+        j = int(j)
+        score = float(rel[j])
+        if prev_vec is not None:
+            mac = float(compute_mac(vecs[:, j], prev_vec))
+            if np.isfinite(mac):
+                score += 1.0 - mac
+            else:
+                score += 1.0
+        if prev_p is not None and np.isfinite(np.real(prev_p)):
+            score += 0.15 * abs(float(np.real(vals[j])) - float(np.real(prev_p)))
+        scores.append(score)
+    j_sel = int(near[int(np.argmin(np.asarray(scores, dtype=float)))])
+    return vals[j_sel], vecs[:, j_sel], j_sel
 
 
 def _tracking_omega_target(s, last_converged_omegas, mac_presel_omega, p_target):
@@ -102,6 +176,9 @@ def select_pk_mode_initial_lock(
     if n == 0:
         return None, None, None
 
+    omega_phys_min = physical_omega_min(omega_n)
+    phys_ok = omegas >= omega_phys_min
+
     margin = float(freq_margin)
     omega_struct = float(omega_n[s]) if s < len(omega_n) else float(omegas[0])
 
@@ -121,7 +198,7 @@ def select_pk_mode_initial_lock(
         if np.isfinite(omega_hi_inter):
             upper_bound = min(upper_bound, omega_hi_inter)
 
-        mask = (omegas >= lower_bound) & (omegas <= upper_bound)
+        mask = (omegas >= lower_bound) & (omegas <= upper_bound) & phys_ok
         mask &= _unclaimed_root_mask(
             omegas,
             converged_omegas_at_V,
@@ -136,7 +213,7 @@ def select_pk_mode_initial_lock(
                 expand += 0.05
                 lower_bound = max(omega_lo_inter, omega_struct * (1.0 - expand))
                 upper_bound = omega_struct * (1.0 + expand)
-                mask = (omegas >= lower_bound) & (omegas <= upper_bound)
+                mask = (omegas >= lower_bound) & (omegas <= upper_bound) & phys_ok
                 mask &= _unclaimed_root_mask(
                     omegas,
                     converged_omegas_at_V,
@@ -151,7 +228,9 @@ def select_pk_mode_initial_lock(
                     )
                     break
 
-        valid = np.where(mask)[0] if np.any(mask) else np.arange(n)
+        valid = np.where(mask)[0] if np.any(mask) else np.where(phys_ok)[0]
+        if valid.size == 0:
+            return None, None, None
         om_candidates = [float(omegas[i]) for i in valid]
 
         if p_target is not None and np.isfinite(np.abs(p_target)):
@@ -179,9 +258,13 @@ def select_pk_mode_initial_lock(
         )
         return vals[j_sel], vecs[:, j_sel], j_sel
 
-    freq_errors = np.abs(omegas - omega_struct)
-    j_sel = int(np.argmin(freq_errors))
-    rel = freq_errors[j_sel] / max(omega_struct, 1e-6)
+    phys_candidates = np.where(phys_ok)[0]
+    if phys_candidates.size == 0:
+        return None, None, None
+    freq_errors = np.abs(omegas[phys_candidates] - omega_struct)
+    best_local = int(np.argmin(freq_errors))
+    j_sel = int(phys_candidates[best_local])
+    rel = freq_errors[best_local] / max(omega_struct, 1e-6)
     if rel > 0.3:
         print(
             f"      ⚠ Mode {s}: ω={omegas[j_sel]:.3f} rad/s is {rel * 100:.1f}% "
@@ -241,8 +324,20 @@ def predict_and_select_reorder_modes(
 
         p_v1 = prev_modes[s].get("p")
         p_v2 = prev2_modes[s].get("p")
-        if p_v1 is None or p_v2 is None or np.isnan(p_v1) or np.isnan(p_v2):
-            pick = available[0]
+        omega_prev_slot = prev_modes[s].get("omega", np.nan)
+
+        # If p-based prediction is not available, do NOT fall back to an arbitrary
+        # available root (it can arbitrarily scramble branch slots). Instead, pick the
+        # root whose frequency is closest to the previous converged omega in this slot.
+        if p_v1 is None or p_v2 is None or not np.isfinite(np.real(p_v1)) or not np.isfinite(np.real(p_v2)):
+            if np.isfinite(omega_prev_slot):
+                pick = min(
+                    available,
+                    key=lambda r: abs(float(res_V[r].get("omega", np.nan)) - float(omega_prev_slot)),
+                )
+            else:
+                pick = available[0]
+
             reordered.append({**res_V[pick], "mode": int(s)})
             available.remove(pick)
             continue
@@ -250,8 +345,18 @@ def predict_and_select_reorder_modes(
         p_ext = 2.0 * complex(p_v1) - complex(p_v2)
         omega_ext = float(np.abs(np.imag(p_ext)))
 
+        # Use delta as a relative frequency search band around omega_ext.
+        candidates = []
+        for r in available:
+            omega_r = res_V[r].get("omega", np.nan)
+            if np.isfinite(omega_r):
+                rel = abs(float(omega_r) - omega_ext) / max(omega_ext, 1e-6)
+                if rel <= float(delta):
+                    candidates.append(r)
+
+        search_set = candidates if candidates else available
         pick = min(
-            available,
+            search_set,
             key=lambda r: abs(float(res_V[r].get("omega", np.nan)) - omega_ext),
         )
         omega_pick = float(res_V[pick].get("omega", np.nan))
@@ -282,9 +387,9 @@ def predict_and_select_reorder_modes(
 def predict_p_target_from_history(results, s, i):
     """
     Predict p_target for mode s using extrapolation from converged p values.
-    
+
     Uses quadratic extrapolation if 3+ points available, linear if 2 points available.
-    
+
     Parameters
     ----------
     results : list of dicts
@@ -293,7 +398,7 @@ def predict_p_target_from_history(results, s, i):
         Mode index to predict
     i : int
         Current velocity step index
-        
+
     Returns
     -------
     p_target : complex or None
@@ -302,7 +407,7 @@ def predict_p_target_from_history(results, s, i):
     # Need at least 2 previous velocity steps for extrapolation
     if i < 2:
         return None
-    
+
     # Extract available converged p values for mode s (looking back up to 3 steps)
     p_history = []
     for step_idx in range(max(0, i-3), i):
@@ -313,20 +418,36 @@ def predict_p_target_from_history(results, s, i):
                 # Check if mode was converged and not lost
                 if p_val is not None and not np.isnan(p_val):
                     p_history.append(p_val)
-    
+
     # Quadratic extrapolation with 3 points: p(n+1) = 3*p(n) - 3*p(n-1) + p(n-2)
     if len(p_history) >= 3:
         # Use last 3 points
         p_target = 3.0 * p_history[-1] - 3.0 * p_history[-2] + p_history[-3]
         return p_target
-    
+
     # Linear extrapolation with 2 points: p(n+1) = 2*p(n) - p(n-1)
     elif len(p_history) == 2:
         p_target = 2.0 * p_history[-1] - p_history[-2]
         return p_target
-    
+
     # Not enough history
     return None
+
+
+def _pk_mac_reference_vector(prev_step_vec, prev_iter_vec, mac_reference="previous_velocity"):
+    """Resolve MAC reference eigenvector for PK mode tracking."""
+    ref = str(mac_reference or "previous_velocity").lower().replace("-", "_")
+    if ref in ("previous_iteration", "prev_iter", "same_velocity"):
+        if prev_iter_vec is not None:
+            return prev_iter_vec, "prev_iter"
+        if prev_step_vec is not None:
+            return prev_step_vec, "prev_step"
+    else:
+        if prev_step_vec is not None:
+            return prev_step_vec, "prev_step"
+        if prev_iter_vec is not None:
+            return prev_iter_vec, "prev_iter"
+    return None, "none"
 
 
 def mode_matching_paper_compliant(vals, vecs, s, j,
@@ -340,7 +461,9 @@ def mode_matching_paper_compliant(vals, vecs, s, j,
                                    p_target=None,
                                    skip_inter_mode_on_perfect_mac=False,
                                    claimed_indices=None,
-                                   min_omega_sep_rad=1.0):
+                                   min_omega_sep_rad=1.0,
+                                   omega_phys_min=None,
+                                   mac_reference="previous_velocity"):
     """
     MAC-driven mode matching / locking with fallback to p_target prediction.
 
@@ -363,8 +486,10 @@ def mode_matching_paper_compliant(vals, vecs, s, j,
                               velocity step (cross-velocity MAC reference).
     prev_iter_vec           : eigenvector selected at the previous PK iteration
                               within the current velocity step (intra-velocity MAC
-                              reference).  Takes priority over prev_step_vec when
-                              both are available, because it is more up-to-date.
+                              reference).
+    mac_reference           : ``previous_velocity`` (default) — MAC vs converged
+                              mode at V_{i-1}; ``previous_iteration`` — MAC vs
+                              same-V previous PK iterate (legacy behaviour).
     p_target                : predicted eigenvalue from last 3 converged p values
                               (used as fallback when MAC < 0.7)
     skip_inter_mode_on_perfect_mac : if True, do not apply inter-mode separation
@@ -376,13 +501,19 @@ def mode_matching_paper_compliant(vals, vecs, s, j,
     p_sel, u_sel, j_sel : selected eigenvalue, eigenvector, index (or None, None, None)
     """
     omegas = np.abs(np.imag(vals))
+    if omega_phys_min is None:
+        omega_phys_min = physical_omega_min(omega_n)
+    else:
+        omega_phys_min = float(omega_phys_min)
+    phys_ok = omegas >= omega_phys_min
+
     unclaimed = _unclaimed_root_mask(
         omegas,
         converged_omegas_at_V,
         claimed_indices=claimed_indices,
         freq_margin=freq_margin,
         min_omega_sep_rad=min_omega_sep_rad,
-    )
+    ) & phys_ok
     if not np.any(unclaimed):
         print(
             f"      ⚠ MODE {s}: no unclaimed wet roots "
@@ -400,25 +531,12 @@ def mode_matching_paper_compliant(vals, vecs, s, j,
             )
 
     # ------------------------------------------------------------------ #
-    # MAC reference vector priority:                                       #
-    #  1. prev_iter_vec  — same velocity, previous PK iteration           #
-    #     (intra-velocity tracking, most up-to-date shape).               #
-    #  2. prev_step_vec  — previous velocity step, same mode              #
-    #     (cross-velocity tracking, available from 2nd speed onward).     #
-    #  3. None           — first velocity step, first iteration:          #
-    #     MAC is disabled and the window falls back to structural freq.   #
+    # MAC reference vector (see mac_reference / _pk_mac_reference_vector)  #
     # ------------------------------------------------------------------ #
-    #if j == 0 and s == 0:
-
-    if prev_iter_vec is not None:
-        u_ref = prev_iter_vec
-        ref_src = "prev_iter"
-    elif prev_step_vec is not None:
-        u_ref = prev_step_vec
-        ref_src = "prev_step"
-    else:
-        u_ref = None
-        ref_src = "none"
+    u_ref, ref_src = _pk_mac_reference_vector(
+        prev_step_vec, prev_iter_vec, mac_reference=mac_reference,
+    )
+    ref_is_prev_velocity = ref_src == "prev_step"
 
     # ------------------------------------------------------------------ #
     # MAC pre-selector: compute MAC for ALL candidates.                   #
@@ -431,12 +549,31 @@ def mode_matching_paper_compliant(vals, vecs, s, j,
 
     if u_ref is not None and len(omegas) > 0:
         pool = np.where(unclaimed)[0]
-        mac_all = np.array([compute_mac(vecs[:, idx], u_ref) for idx in pool])
-        mac_presel_idx = int(pool[int(np.argmax(mac_all))])
-        mac_presel_val = float(np.max(mac_all))
-        mac_presel_omega = omegas[mac_presel_idx]
-        print(f"      MAC pre-selector (ref={ref_src}): best MAC={mac_presel_val:.3f} "
-              f"at ω={mac_presel_omega:.3f} rad/s (index {mac_presel_idx}, unclaimed only)")
+        if pool.size > 0:
+            mac_all = np.array([compute_mac(vecs[:, idx], u_ref) for idx in pool])
+            mac_presel_idx = int(pool[int(np.argmax(mac_all))])
+            mac_presel_val = float(np.max(mac_all))
+            mac_presel_omega = float(omegas[mac_presel_idx])
+            if mac_presel_omega < omega_phys_min:
+                print(
+                    f"      MAC pre-selector: ignoring ω={mac_presel_omega:.3f} rad/s "
+                    f"(< ω_phys_min={omega_phys_min:.3f})"
+                )
+                mac_presel_omega = None
+                mac_presel_idx = None
+                mac_presel_val = 0.0
+            else:
+                print(
+                    f"      MAC pre-selector (ref={ref_src}): best MAC={mac_presel_val:.3f} "
+                    f"at ω={mac_presel_omega:.3f} rad/s (index {mac_presel_idx}, physical only)"
+                )
+
+    # When MAC centre is unusable, prefer p_target / previous-step ω over ω≈0.
+    if mac_presel_omega is None and p_target is not None and np.isfinite(np.abs(p_target)):
+        omega_pt = float(np.abs(np.imag(p_target)))
+        if omega_pt >= omega_phys_min:
+            mac_presel_omega = omega_pt
+            print(f"      Window centre from p_target: ω={omega_pt:.3f} rad/s")
 
     # ------------------------------------------------------------------ #
     # Step 1: Establish frequency window centre and bounds.               #
@@ -468,6 +605,9 @@ def mode_matching_paper_compliant(vals, vecs, s, j,
             else:
                 lower_bound, upper_bound = _apply_inter_mode_separation(
                     lower_bound, upper_bound, s, converged_omegas_at_V, freq_margin)
+                lower_bound, upper_bound, omega_ref = _repair_frequency_window(
+                    lower_bound, upper_bound, omega_ref, omega_phys_min=omega_phys_min,
+                )
 
     elif len(last_converged_omegas) > 0 and s < len(last_converged_omegas):
         # B — seed from previous velocity step (j==0, MAC not yet available)
@@ -481,6 +621,9 @@ def mode_matching_paper_compliant(vals, vecs, s, j,
         if len(converged_omegas_at_V) > 0:
             lower_bound, upper_bound = _apply_inter_mode_separation(
                 lower_bound, upper_bound, s, converged_omegas_at_V, freq_margin)
+            lower_bound, upper_bound, omega_ref = _repair_frequency_window(
+                lower_bound, upper_bound, omega_ref, omega_phys_min=omega_phys_min,
+            )
     else:
         # C — very first velocity step, j==0, no history at all
         margin_factor = 0.2  # ±20%
@@ -584,31 +727,32 @@ def mode_matching_paper_compliant(vals, vecs, s, j,
         mac_val_sel  = mac_all_valid[best_local]
         freq_err_sel = freq_errs[best_local]
         score_sel    = scores[best_local]
-        
+
         # MAC constraint: if MAC < 0.7, fall back to p_target prediction
-        if mac_val_sel < 0.7:
+        # (skip when tracking vs previous-V shape — p_target often causes jumps)
+        if mac_val_sel < 0.7 and not ref_is_prev_velocity:
             if p_target is not None:
                 print(f"      ⚠ Low MAC detected ({mac_val_sel:.3f} < 0.7)")
                 print(f"         → Switching to p_target-based selection: p_target={p_target:.6f}")
-                
+
                 # Find candidate closest to p_target
                 p_errors = np.array([abs(vals[idx] - p_target) for idx in valid_indices])
                 best_p_local = int(np.argmin(p_errors))
                 j_sel_p = valid_indices[best_p_local]
-                
+
                 # Calculate MAC for p_target-selected candidate
                 mac_val_p = mac_all_valid[best_p_local]
                 p_error = p_errors[best_p_local]
-                
+
                 print(f"         p_target candidate: ω={omegas[j_sel_p]:.3f} rad/s, "
                       f"MAC={mac_val_p:.3f}, |p-p_target|={p_error:.3e}")
-                
+
                 # Use p_target selection
                 j_sel = j_sel_p
                 mac_val_sel = mac_val_p
                 freq_err_sel = abs(omegas[j_sel] - np.abs(np.imag(p_target))) / max(np.abs(np.imag(p_target)), 1e-6)
                 score_sel = p_error
-                
+
                 print(f"      ✓ Selected (p_target): ω={omegas[j_sel]:.3f} rad/s, "
                       f"MAC={mac_val_sel:.3f}, p_error={p_error:.3e}")
             else:

@@ -1,0 +1,58 @@
+NOTA — Massa aggiunta da strip theory: lumping ai nodi FEA
+===========================================================
+Riferimento: STRUCTURE/FEA/structural_analysis.py, funzione mass_matrix_strip_theory()
+Data: 2026-06-10
+
+1. Teoria
+---------
+La massa aggiunta da strip theory è una densità lineare [kg/m], definita
+sulla sezione continua (né su un elemento né su un nodo):
+
+    m_a'(y) = rho * pi * c(y)^2 / 4        (sezione tipo Theodorsen)
+
+La massa aggiunta totale è l'integrale lungo l'apertura:
+
+    M_a = ∫ m_a'(y) dy = m_a' * L          (per corda costante)
+
+2. Discretizzazione (lumping)
+-----------------------------
+Le strip sono associate agli ELEMENTI, ma la matrice lumped vive sui NODI.
+Ogni elemento di lunghezza dy ha massa aggiunta m_a'*dy, ripartita a metà
+tra i suoi due nodi di estremità:
+
+    per ogni elemento e (nodi e, e+1):
+        M[nodo_e]   += 0.5 * m_a' * dy
+        M[nodo_e+1] += 0.5 * m_a' * dy     (sui 2 DOF trasversali allo span)
+
+Risultato per accumulo:
+    - nodi interni  (2 elementi adiacenti): m_a' * dy
+    - nodi estremi  (1 elemento adiacente): 0.5 * m_a' * dy
+    - totale: (n_el) * m_a' * dy = m_a' * L   → massa conservata
+
+Equivale esattamente alla quadratura del trapezio con zone tributarie
+nodali (dy/2 a sinistra + dy/2 a destra per i nodi interni).
+
+3. Bug corretto
+---------------
+La versione precedente iterava sui NODI assegnando a ciascuno una sola
+volta 0.5*m_a'*dy: i nodi interni ricevevano metà della loro zona
+tributaria e il totale era ~0.5*m_a'*L, cioè METÀ della massa aggiunta
+fisica. Conseguenza: frequenze bagnate sovrastimate (omega_wet ~
+sqrt(K/(M_s+M_f))) e dinamica flesso-torsionale / flutter alterata.
+
+La versione corrente itera sugli elementi (loop "for e in range(N-1)")
+e il print di verifica confronta il totale assemblato con m_a'*L.
+
+4. Nota sulla corda
+-------------------
+Nel codice chord = config.chord è uno scalare. Per tutti gli esempi
+attuali (ABRAMSON1965, GOLAND, Model1, Model2, NACA0003, NACA0015_POM)
+chord_root == chord_tip, quindi il valore scalare coincide con la corda
+nodale e il lumping per elemento è identico a quello per zone tributarie.
+
+Per future ali RASTREMATE (corda variabile in apertura) generalizzare a:
+
+    m_a[i] = rho * pi * c(y_i)^2 / 4 * dy_trib[i]
+
+con dy_trib[i] = 0.5*(y[i+1]-y[i-1]) per i nodi interni e metà intervallo
+per i nodi di bordo (regola del trapezio con corda nodale).

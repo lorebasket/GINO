@@ -1,0 +1,4 @@
+[copertura] GOLAND_water: 220 radici
+  BEM  griglia 0.05-250.00 rad/s, superficie libera fino a n/d; radici fuori griglia 0, fuori superficie libera 0; serve fino a 145.9 rad/s -> OK
+  UVLM k_max 24.0 1/m; radici fuori 0 (V []); banda preventiva chiede k fino a 145.9 -> OK sulle radici, banda preventiva non coperta
+  banda dai modi bagnati: 0.00-145.94 rad/s

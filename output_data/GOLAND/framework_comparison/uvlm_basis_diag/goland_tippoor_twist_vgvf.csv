@@ -1,0 +1,6 @@
+framework,label,V_f_m_s,f_f_Hz
+sharpy,SHARPy UVLM (official nm8),163.76736555165633,11.249662830264352
+gino_baseline,GINO-UVLM baseline (tip-rich mode1),162.28312757201647,11.212703943770121
+gino_tippoor,GINO-UVLM mode1 tip-poor Ry only,147.01940820871778,11.924134464525821
+gino_sharpy_basis,GINO-UVLM full SHARPy structural basis,163.8126776577601,11.26005091483319
+gino_dlm_sharpy_basis,GINO-DLM + SHARPy M̂/K̂ + shapes,190.21238095238095,12.147119708068203

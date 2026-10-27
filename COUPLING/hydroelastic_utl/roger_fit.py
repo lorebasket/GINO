@@ -34,11 +34,11 @@ def load_rfa_matrices_from_disk(config, velocity, space_type):
     import numpy as np
     import pandas as pd
     
-    # Construct path to RFA matrices
     space_label = "panel_space" if space_type == "panel" else "rigid_body_space"
-    output_dir = getattr(config, 'output_dir', '/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI/output_data')
-    rfa_dir = os.path.join(output_dir, "RFA_matrices", config.name, f"V_{velocity:.0f}", space_label)
-    
+    output_dir = getattr(config, 'output_dir', '.')
+    rfa_dir = os.path.join(output_dir, "RFA_matrices", f"V_{velocity:.0f}", space_label)
+    if not os.path.exists(rfa_dir):
+        rfa_dir = os.path.join(output_dir, "RFA_matrices", config.name, f"V_{velocity:.0f}", space_label)
     if not os.path.exists(rfa_dir):
         raise FileNotFoundError(
             f"RFA matrices directory not found: {rfa_dir}\n"
@@ -242,9 +242,9 @@ def save_rfa_matrices_to_csv(Q0, Q1, Q2, Alag, blag, config, output_dir, velocit
     import os
     import pandas as pd
     
-    # Create output directory structure: output_data/RFA_matrices/{config.name}/V_{velocity}/{space_type}/
+    # output_data/<case>/RFA_matrices/V_{velocity}/{space_type}/
     space_label = "panel_space" if space_type == "panel" else "rigid_body_space"
-    rfa_base_dir = os.path.join(output_dir, "RFA_matrices", config.name, f"V_{velocity:.0f}")
+    rfa_base_dir = os.path.join(output_dir, "RFA_matrices", f"V_{velocity:.0f}")
     rfa_dir = os.path.join(rfa_base_dir, space_label)
     os.makedirs(rfa_dir, exist_ok=True)
     
@@ -353,8 +353,9 @@ def load_rfa_matrices_from_csv(case_name, velocity, output_dir, space_type="pane
     import numpy as np
     
     space_label = "panel_space" if space_type == "panel" else "rigid_body_space"
-    rfa_dir = os.path.join(output_dir, "RFA_matrices", case_name, f"V_{velocity:.0f}",space_label)
-    
+    rfa_dir = os.path.join(output_dir, "RFA_matrices", f"V_{velocity:.0f}", space_label)
+    if not os.path.exists(rfa_dir) and case_name:
+        rfa_dir = os.path.join(output_dir, "RFA_matrices", case_name, f"V_{velocity:.0f}", space_label)
     if not os.path.exists(rfa_dir):
         raise FileNotFoundError(f"RFA matrices directory not found: {rfa_dir}")
     
@@ -577,7 +578,7 @@ def main():
         print(f"Q2 (panel space) shape: {Q2.shape}")
         print(f"Alag (panel space) count: {len(Alag)}, each shape: {Alag[0].shape if Alag else 'N/A'}")
         print(f"blag (poles): {blag}\n")
-        save_rfa_matrices_to_csv(Q0, Q1, Q2, Alag, blag, _analysis_cfg, FSI_path + '/output_data', V, space_type="panel")
+        save_rfa_matrices_to_csv(Q0, Q1, Q2, Alag, blag, _analysis_cfg, _analysis_cfg.output_dir, V, space_type="panel")
         
         print(f"\n{'='*70}")
         print(f"  RFA MATRICES SAVED FOR V = {V} m/s (panel space)")

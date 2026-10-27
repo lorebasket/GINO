@@ -72,6 +72,36 @@ def compute_mac(u1, u2, n_structural_dof=None):
     return mac_value
 
 
+def reference_eigenvector_for_mac(
+    vecs_sweep,
+    slot,
+    *,
+    raw_results=None,
+    mac_reference="previous_velocity",
+):
+    """
+    Eigenvector used as MAC reference for branch ``slot``.
+
+    ``previous_velocity`` (default): wet eigenvector at V_{i-1} for the same branch
+    slot — allows mode shapes to evolve toward coalescence (flutter theory).
+
+    ``last_valid``: latest converged eigenvector before any ``mode_lost`` gap
+    (recovery / reacquisition after branch dropout).
+    """
+    ref = str(mac_reference or "previous_velocity").lower().replace("-", "_")
+    if ref in ("previous", "previous_velocity", "prev", "prev_velocity"):
+        if vecs_sweep:
+            v_prev = vecs_sweep[-1]
+            if (
+                v_prev is not None
+                and hasattr(v_prev, "ndim")
+                and v_prev.ndim == 2
+                and 0 <= int(slot) < v_prev.shape[1]
+            ):
+                return v_prev[:, int(slot)]
+    return last_valid_branch_eigenvector(vecs_sweep, raw_results, slot)
+
+
 def extract_structural_modes_from_augmented(eigenvalues, eigenvectors, n_modes, omega_n,
                                              threshold_factor=0.1, candidates_multiplier=2,
                                              vecs_previous=None, freqs_previous=None):
@@ -222,6 +252,670 @@ def should_mark_mode_lost(freq_rad, eigenvalue, eigenvector, omega_n, f_min_hz=2
     return is_dummy_eigenpair(eigenvalue, eigenvector, omega_n)
 
 
+def last_valid_branch_mode(raw_results, slot):
+    """Latest converged branch snapshot for slot ``slot`` (search backward in V history)."""
+    for step in range(len(raw_results) - 1, -1, -1):
+        modes = raw_results[step].get("modes", [])
+        if slot >= len(modes):
+            continue
+        md = modes[slot]
+        omega = md.get("omega", np.nan)
+        p_val = md.get("p", np.nan)
+        if not md.get("converged", False):
+            continue
+        if not (np.isfinite(omega) and omega > 0.0):
+            continue
+        if p_val is None or not np.isfinite(np.abs(p_val)):
+            continue
+        return md, step
+    return None, None
+
+
+def predict_branch_omega_from_history(raw_results, slot):
+    """Linear ω extrapolation from the last two valid converged branch states."""
+    p_hist = []
+    for step in range(len(raw_results) - 1, -1, -1):
+        modes = raw_results[step].get("modes", [])
+        if slot >= len(modes):
+            continue
+        md = modes[slot]
+        if md.get("mode_lost", False):
+            continue
+        p_val = md.get("p", None)
+        if not md.get("converged", False):
+            continue
+        if p_val is None or not np.isfinite(np.real(p_val)):
+            continue
+        p_hist.insert(0, complex(p_val))
+        if len(p_hist) >= 2:
+            break
+    if len(p_hist) >= 2:
+        return float(np.abs(np.imag(2.0 * p_hist[-1] - p_hist[-2])))
+    if len(p_hist) == 1:
+        return float(np.abs(np.imag(p_hist[0])))
+    return None
+
+
+def valid_branch_V_omega_history(
+    raw_results,
+    slot,
+    max_points=4,
+    *,
+    omega_cap=None,
+):
+    """Valid (V, ω, step) snapshots for branch ``slot``, newest last."""
+    hist = []
+    for step in range(len(raw_results) - 1, -1, -1):
+        entry = raw_results[step]
+        modes = entry.get("modes", [])
+        if slot >= len(modes):
+            continue
+        md = modes[slot]
+        if md.get("mode_lost", False) or not md.get("converged", False):
+            continue
+        omega = float(md.get("omega", np.nan))
+        if not (np.isfinite(omega) and omega > 0.0):
+            continue
+        if omega_cap is not None and np.isfinite(omega_cap) and omega > float(omega_cap):
+            continue
+        V_step = float(entry.get("V", np.nan))
+        if not np.isfinite(V_step):
+            continue
+        hist.insert(0, (V_step, omega, int(step)))
+        if len(hist) >= int(max_points):
+            break
+    return hist
+
+
+def branch_lost_streak_length(raw_results, slot):
+    """How many consecutive recent velocity steps ended with ``mode_lost`` on ``slot``."""
+    if not raw_results:
+        return 0
+    streak = 0
+    for step in range(len(raw_results) - 1, -1, -1):
+        modes = raw_results[step].get("modes", [])
+        if slot >= len(modes):
+            break
+        md = modes[slot]
+        if md.get("mode_lost", False) or not md.get("converged", False):
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def branch_slot_lost_at_previous(raw_results, slot):
+    if not raw_results:
+        return False
+    modes = raw_results[-1].get("modes", [])
+    if slot >= len(modes):
+        return False
+    return bool(modes[slot].get("mode_lost", False))
+
+
+def _partner_slot_for(slot, n_slots):
+    if int(n_slots) < 2:
+        return None
+    return int(slot) - 1 if int(slot) > 0 else 1
+
+
+def _median_coalescence_gap(raw_results, slot, partner_slot, *, omega_cap=None):
+    """Median (ω_slot − ω_partner) at steps where both branches were valid."""
+    if partner_slot is None or partner_slot < 0:
+        return None
+    self_hist = valid_branch_V_omega_history(
+        raw_results, slot, max_points=8, omega_cap=omega_cap
+    )
+    partner_hist = valid_branch_V_omega_history(
+        raw_results, partner_slot, max_points=8, omega_cap=omega_cap
+    )
+    if not self_hist or not partner_hist:
+        return None
+    gaps = []
+    for V_s, w_s, step_s in self_hist:
+        for V_p, w_p, step_p in partner_hist:
+            if int(step_s) == int(step_p):
+                gaps.append(float(w_s) - float(w_p))
+    if not gaps:
+        return None
+    return float(np.median(gaps))
+
+
+def predict_branch_omega_from_partner(
+    raw_results,
+    slot,
+    partner_slot,
+    V_current,
+    *,
+    omega_cap=None,
+):
+    """ω(slot) ≈ ω_partner(V) + median historical gap at co-stepped valid points."""
+    if partner_slot is None or partner_slot < 0:
+        return None
+    partner_hist = valid_branch_V_omega_history(
+        raw_results, partner_slot, max_points=4, omega_cap=omega_cap
+    )
+    if not partner_hist:
+        return None
+    gap = _median_coalescence_gap(
+        raw_results, slot, partner_slot, omega_cap=omega_cap
+    )
+    if gap is None:
+        return None
+    V_p2, w_p2, _ = partner_hist[-1]
+    if len(partner_hist) >= 2:
+        V_p1, w_p1, _ = partner_hist[-2]
+        dVp = float(V_p2) - float(V_p1)
+        w_p_pred = (
+            float(w_p2) + (float(V_current) - float(V_p2)) * (float(w_p2) - float(w_p1)) / dVp
+            if abs(dVp) > 1e-9
+            else float(w_p2)
+        )
+    else:
+        w_p_pred = float(w_p2)
+    return float(w_p_pred + float(gap))
+
+
+def _self_history_unreliable(raw_results, slot, partner_slot, hist, *, omega_cap=None):
+    """True when linear self extrapolation is likely corrupted (orphan / collapse)."""
+    if not hist:
+        return True
+    if partner_slot is None or partner_slot < 0:
+        return False
+    partner_hist = valid_branch_V_omega_history(
+        raw_results, partner_slot, max_points=4, omega_cap=omega_cap
+    )
+    if not partner_hist:
+        return False
+    w_self = float(hist[-1][1])
+    w_partner = float(partner_hist[-1][1])
+    gap_now = w_self - w_partner
+    median_gap = _median_coalescence_gap(
+        raw_results, slot, partner_slot, omega_cap=omega_cap
+    )
+    if median_gap is not None and abs(gap_now) < 0.35 * abs(median_gap):
+        return True
+    if int(slot) > int(partner_slot) and w_self <= w_partner * 1.02:
+        return True
+    if int(slot) < int(partner_slot) and w_self >= w_partner * 0.98:
+        return True
+    if len(hist) >= 2 and len(partner_hist) >= 2:
+        V1, w1, _ = hist[-2]
+        V2, w2, _ = hist[-1]
+        Vp1, wp1, _ = partner_hist[-2]
+        Vp2, wp2, _ = partner_hist[-1]
+        dV = float(V2) - float(V1)
+        dVp = float(Vp2) - float(Vp1)
+        if abs(dV) > 1e-9 and abs(dVp) > 1e-9:
+            slope_self = abs((float(w2) - float(w1)) / dV)
+            slope_partner = abs((float(wp2) - float(wp1)) / dVp)
+            if slope_partner > 1e-9 and slope_self > 2.5 * slope_partner:
+                return True
+    if omega_cap is not None and w_self > 0.92 * float(omega_cap):
+        return True
+    return False
+
+
+def predict_branch_omega_at_V(
+    raw_results,
+    slot,
+    V_current,
+    *,
+    omega_n=None,
+    mode_indices_tracked=None,
+    max_struct_frac=1.35,
+    partner_slot=None,
+    prefer_partner_after_streak=2,
+):
+    """
+    Predict wet-branch ω at ``V_current`` from the last valid (V, ω) history.
+
+    History excludes orphan captures above the structural ω cap. When self history
+    is unreliable or the branch has been lost for several steps, prefer partner-branch
+    coalescence (ω_partner + median historical gap).
+    """
+    omega_cap = None
+    if (
+        omega_n is not None
+        and mode_indices_tracked is not None
+        and slot < len(mode_indices_tracked)
+    ):
+        omega_n_arr = np.asarray(omega_n, dtype=float).ravel()
+        m_struct = int(mode_indices_tracked[slot])
+        if 0 <= m_struct < omega_n_arr.size and float(max_struct_frac) > 0.0:
+            omega_cap = float(omega_n_arr[m_struct]) * float(max_struct_frac)
+
+    if partner_slot is None:
+        partner_slot = _partner_slot_for(slot, 2)
+
+    omega_partner = predict_branch_omega_from_partner(
+        raw_results,
+        slot,
+        partner_slot,
+        V_current,
+        omega_cap=omega_cap,
+    )
+
+    hist = valid_branch_V_omega_history(
+        raw_results, slot, max_points=2, omega_cap=omega_cap
+    )
+    omega_self = None
+    if len(hist) >= 2:
+        V1, w1, _ = hist[-2]
+        V2, w2, _ = hist[-1]
+        dV = float(V2) - float(V1)
+        omega_self = (
+            float(w2 + (float(V_current) - float(V2)) * (w2 - w1) / dV)
+            if abs(dV) > 1e-9
+            else float(w2)
+        )
+    elif len(hist) == 1:
+        omega_self = float(hist[0][1])
+
+    streak = branch_lost_streak_length(raw_results, slot)
+    self_bad = _self_history_unreliable(
+        raw_results, slot, partner_slot, hist, omega_cap=omega_cap
+    )
+
+    if (
+        streak >= int(prefer_partner_after_streak)
+        and omega_partner is not None
+        and np.isfinite(omega_partner)
+        and omega_partner > 0.0
+    ):
+        omega_pred = float(omega_partner)
+    elif self_bad and omega_partner is not None and np.isfinite(omega_partner):
+        if omega_self is not None and np.isfinite(omega_self) and omega_self > 0.0:
+            omega_pred = float(0.25 * omega_self + 0.75 * omega_partner)
+        else:
+            omega_pred = float(omega_partner)
+    elif omega_self is not None:
+        omega_pred = float(omega_self)
+    elif omega_partner is not None:
+        omega_pred = float(omega_partner)
+    else:
+        omega_pred = predict_branch_omega_from_history(raw_results, slot)
+
+    if omega_pred is None or not np.isfinite(omega_pred) or omega_pred <= 0.0:
+        return omega_pred
+    if omega_cap is not None and float(omega_pred) > float(omega_cap):
+        omega_pred = float(omega_cap)
+    return float(omega_pred)
+
+
+def last_valid_branch_eigenvector(vecs_sweep, raw_results, slot):
+    """Structural eigenvector from the latest valid converged step for ``slot``."""
+    _, step_ref = last_valid_branch_mode(raw_results, slot)
+    if (
+        step_ref is None
+        or step_ref < 0
+        or step_ref >= len(vecs_sweep)
+        or vecs_sweep[step_ref] is None
+    ):
+        return None
+    vecs_step = vecs_sweep[step_ref]
+    if vecs_step.ndim != 2 or slot >= vecs_step.shape[1]:
+        return None
+    return vecs_step[:, slot]
+
+
+def reacquire_lost_branch_in_pool(
+    slot,
+    freq_pool,
+    vecs_pool,
+    raw_results,
+    vecs_sweep,
+    V_current,
+    used_pool_indices,
+    *,
+    rel_band=0.20,
+    rel_band_growth=0.04,
+    rel_band_max=0.35,
+    min_mac=0.65,
+    w_freq=0.8,
+    w_mac=0.6,
+    n_structural_dof=None,
+    omega_n=None,
+    mode_indices_tracked=None,
+    max_struct_frac=1.35,
+    n_slots=2,
+    partner_omega=None,
+    min_partner_sep_frac=0.08,
+    prefer_partner_streak=2,
+    mac_reference="previous_velocity",
+):
+    """
+    Search the wet root pool near the predicted ω(V) neighbourhood and pick the
+    best MAC match to the reference branch eigenvector (previous V or last valid).
+
+    Returns pool index, or -1 if no acceptable root is found.
+    """
+    freq_pool = np.asarray(freq_pool, dtype=float).ravel()
+    if freq_pool.size == 0:
+        return -1
+
+    partner_slot = _partner_slot_for(slot, n_slots)
+
+    omega_cap = None
+    omega_struct = None
+    if (
+        omega_n is not None
+        and mode_indices_tracked is not None
+        and slot < len(mode_indices_tracked)
+    ):
+        omega_n_arr = np.asarray(omega_n, dtype=float).ravel()
+        m_struct = int(mode_indices_tracked[slot])
+        if 0 <= m_struct < omega_n_arr.size:
+            omega_struct = float(omega_n_arr[m_struct])
+            if float(max_struct_frac) > 0.0:
+                omega_cap = float(omega_struct) * float(max_struct_frac)
+
+    omega_pred = predict_branch_omega_at_V(
+        raw_results,
+        slot,
+        V_current,
+        omega_n=omega_n,
+        mode_indices_tracked=mode_indices_tracked,
+        max_struct_frac=max_struct_frac,
+        partner_slot=partner_slot,
+        prefer_partner_after_streak=int(prefer_partner_streak),
+    )
+    if omega_pred is None or not np.isfinite(omega_pred) or omega_pred <= 0.0:
+        return -1
+    if omega_cap is not None and float(omega_pred) > float(omega_cap):
+        omega_pred = float(omega_cap)
+
+    streak = branch_lost_streak_length(raw_results, slot)
+    band = min(
+        float(rel_band) + float(rel_band_growth) * max(0, int(streak) - 1),
+        float(rel_band_max),
+    )
+    median_gap = _median_coalescence_gap(
+        raw_results, slot, partner_slot, omega_cap=omega_cap
+    )
+
+    u_ref = reference_eigenvector_for_mac(
+        vecs_sweep, slot, raw_results=raw_results, mac_reference=mac_reference
+    )
+    used = {int(i) for i in used_pool_indices if int(i) >= 0}
+
+    partner_w = None
+    if partner_omega is not None and np.isfinite(partner_omega) and float(partner_omega) > 0.0:
+        partner_w = float(partner_omega)
+
+    best_i = -1
+    best_cost = np.inf
+    best_mac = 0.0
+    for i in range(freq_pool.size):
+        if int(i) in used:
+            continue
+        f_i = float(freq_pool[i])
+        if f_i <= 0.0:
+            continue
+        if omega_cap is not None and f_i > float(omega_cap) * 1.01:
+            continue
+        if partner_w is not None and partner_slot is not None and float(min_partner_sep_frac) > 0.0:
+            if int(slot) > int(partner_slot):
+                min_omega = partner_w * (1.0 + float(min_partner_sep_frac))
+                if median_gap is not None and median_gap > 0.0:
+                    min_omega = max(min_omega, partner_w + 0.45 * float(median_gap))
+                if f_i < min_omega:
+                    continue
+            elif int(slot) < int(partner_slot):
+                max_omega = partner_w * (1.0 - float(min_partner_sep_frac))
+                if median_gap is not None and median_gap < 0.0:
+                    max_omega = min(max_omega, partner_w + 0.45 * float(median_gap))
+                if f_i > max_omega:
+                    continue
+        freq_err = abs(f_i - float(omega_pred)) / max(float(omega_pred), 1e-12)
+        if freq_err > band:
+            continue
+        if f_i > float(omega_pred) * (1.0 + 0.5 * band):
+            continue
+        mac_i = 0.0
+        if u_ref is not None and vecs_pool is not None and vecs_pool.ndim == 2:
+            mac_i = compute_mac(vecs_pool[:, i], u_ref, n_structural_dof=n_structural_dof)
+        if mac_i < float(min_mac):
+            continue
+        sep_pen = 0.0
+        if partner_w is not None and partner_w > 0.0:
+            sep_pen = abs(f_i - partner_w) / max(f_i, partner_w, 1e-6)
+            if sep_pen < float(min_partner_sep_frac):
+                continue
+            if abs(f_i - float(omega_pred)) > 1e-12:
+                if abs(f_i - partner_w) < abs(f_i - float(omega_pred)):
+                    continue
+        cost = float(w_freq) * freq_err + float(w_mac) * (1.0 - mac_i) + 0.15 * sep_pen
+        if cost < best_cost:
+            best_cost = cost
+            best_i = int(i)
+            best_mac = float(mac_i)
+
+    if best_i >= 0:
+        print(
+            f"  ↻ RFA branch {slot} REACQUIRED at V={float(V_current):.2f} m/s: "
+            f"ω_pred={float(omega_pred):.3f} rad/s, ω_pick={float(freq_pool[best_i]):.3f} rad/s, "
+            f"MAC_ref={best_mac:.3f}, band={band:.3f}, lost_streak={streak}"
+            + (
+                f", ω_partner={partner_w:.3f}"
+                if partner_w is not None
+                else ""
+            )
+        )
+    return best_i
+
+
+def apply_rfa_branch_guard(
+    g_V,
+    freq_V,
+    vecs_V,
+    eigs_V,
+    raw_results,
+    vecs_sweep,
+    *,
+    V_current=None,
+    max_rel_jump=0.30,
+    min_mac_prev=0.70,
+    max_struct_frac=1.35,
+    min_branch_sep_frac=0.08,
+    check_neighbor_collapse=True,
+    mode_indices_tracked=None,
+    omega_n=None,
+    n_structural_dof=None,
+    enable=True,
+    skip_slots=None,
+    mac_reference="previous_velocity",
+):
+    """
+    After Roger branch assignment at one V, reject incoherent roots as ``mode_lost``.
+
+    A branch is marked lost when any of:
+    - relative frequency jump vs last valid converged step exceeds ``max_rel_jump``;
+    - the same jump exceeds ``max_rel_jump`` vs a linear ω prediction from branch history;
+    - tracked ω exceeds ``max_struct_frac`` × dry structural ω for that branch slot.
+    - branch collapses onto adjacent tracked branch after having been previously separated
+      by more than ``min_branch_sep_frac`` (helps avoid wrong-root capture with MAC≈1).
+    """
+    g_out = np.asarray(g_V, dtype=float).copy()
+    f_out = np.asarray(freq_V, dtype=float).copy()
+    e_out = np.asarray(eigs_V, dtype=complex).copy()
+    v_out = np.array(vecs_V, dtype=complex, copy=True)
+    mode_lost_flags = [False] * f_out.size
+
+    if not enable or not raw_results:
+        return g_out, f_out, v_out, e_out, mode_lost_flags
+
+    # Reference frequencies from last valid converged state, per tracked slot.
+    omega_ref_list = [np.nan] * f_out.size
+    for j in range(f_out.size):
+        md_ref_j, _ = last_valid_branch_mode(raw_results, j)
+        if md_ref_j is not None:
+            omega_ref_list[j] = float(md_ref_j["omega"])
+
+    skip_slots = set(skip_slots or [])
+
+    for j in range(f_out.size):
+        if j in skip_slots:
+            continue
+        omega = float(f_out[j])
+        if not np.isfinite(omega) or omega <= 0.0:
+            continue
+
+        md_ref, step_ref = last_valid_branch_mode(raw_results, j)
+        if md_ref is None:
+            continue
+
+        recovering = branch_slot_lost_at_previous(raw_results, j)
+        omega_ref = float(md_ref["omega"])
+        if recovering and V_current is not None:
+            partner_slot = j - 1 if j > 0 else (j + 1 if j + 1 < f_out.size else None)
+            omega_pred_v = predict_branch_omega_at_V(
+                raw_results,
+                j,
+                V_current,
+                omega_n=omega_n,
+                mode_indices_tracked=mode_indices_tracked,
+                max_struct_frac=max_struct_frac,
+                partner_slot=partner_slot,
+            )
+            if omega_pred_v is not None and np.isfinite(omega_pred_v) and omega_pred_v > 0.0:
+                omega_ref = float(omega_pred_v)
+
+        rel_jump = abs(omega - omega_ref) / max(omega_ref, 1e-6)
+
+        u_ref = reference_eigenvector_for_mac(
+            vecs_sweep, j, raw_results=raw_results, mac_reference=mac_reference
+        )
+
+        mac_prev = (
+            compute_mac(v_out[:, j], u_ref, n_structural_dof=n_structural_dof)
+            if u_ref is not None
+            else float("nan")
+        )
+
+        partner_slot_g = j - 1 if j > 0 else (j + 1 if j + 1 < f_out.size else None)
+        omega_pred = predict_branch_omega_at_V(
+            raw_results,
+            j,
+            V_current,
+            omega_n=omega_n,
+            mode_indices_tracked=mode_indices_tracked,
+            max_struct_frac=max_struct_frac,
+            partner_slot=partner_slot_g,
+        ) if V_current is not None else predict_branch_omega_from_history(raw_results, j)
+        rel_jump_pred = (
+            abs(omega - float(omega_pred)) / max(float(omega_pred), 1e-6)
+            if omega_pred is not None and np.isfinite(omega_pred)
+            else float("nan")
+        )
+
+        incoherent = rel_jump > float(max_rel_jump)
+        if not recovering and np.isfinite(rel_jump_pred) and rel_jump_pred > float(max_rel_jump):
+            incoherent = True
+        if (
+            not recovering
+            and rel_jump > float(max_rel_jump)
+            and np.isfinite(mac_prev)
+            and mac_prev < float(min_mac_prev)
+        ):
+            incoherent = True
+
+        if (
+            max_struct_frac is not None
+            and float(max_struct_frac) > 0.0
+            and mode_indices_tracked is not None
+            and omega_n is not None
+            and j < len(mode_indices_tracked)
+        ):
+            omega_n_arr = np.asarray(omega_n, dtype=float).ravel()
+            m_struct = int(mode_indices_tracked[j])
+            if 0 <= m_struct < omega_n_arr.size:
+                omega_cap = float(omega_n_arr[m_struct]) * float(max_struct_frac)
+                if omega > omega_cap:
+                    neigh_cap = j - 1 if j > 0 else (j + 1 if j + 1 < f_out.size else None)
+                    omega_neigh_cap = (
+                        float(f_out[neigh_cap])
+                        if neigh_cap is not None and np.isfinite(f_out[neigh_cap])
+                        else np.nan
+                    )
+                    # Upper branch well above partner → likely orphan high-ω capture.
+                    high_orphan = (
+                        neigh_cap is not None
+                        and int(j) > int(neigh_cap)
+                        and np.isfinite(omega_neigh_cap)
+                        and omega_neigh_cap > 0.0
+                        and omega > omega_neigh_cap * 1.35
+                    )
+                    # Lower branch may evolve smoothly above dry ω·frac (flutter stiffening).
+                    coherent_rise = (
+                        int(j) == 0
+                        or (
+                            neigh_cap is not None
+                            and int(j) < int(neigh_cap)
+                        )
+                    ) and rel_jump <= float(max_rel_jump) and (
+                        not np.isfinite(mac_prev) or mac_prev >= float(min_mac_prev)
+                    )
+                    if high_orphan or not coherent_rise:
+                        incoherent = True
+
+        # Additional modeguard: if branch j collapses onto adjacent branch although it was
+        # previously well-separated, treat as wrong-root capture (mark lost).
+        if bool(check_neighbor_collapse) and float(min_branch_sep_frac) > 0.0 and f_out.size >= 2:
+            neigh = j - 1 if j > 0 else (j + 1 if j + 1 < f_out.size else None)
+            if neigh is not None:
+                omega_neigh = float(f_out[neigh]) if np.isfinite(f_out[neigh]) else np.nan
+                omega_ref_neigh = float(omega_ref_list[neigh]) if np.isfinite(omega_ref_list[neigh]) else np.nan
+                if np.isfinite(omega_neigh) and np.isfinite(omega_ref_neigh):
+                    sep_now = abs(omega - omega_neigh) / max(omega, omega_neigh, 1e-6)
+                    sep_ref = abs(omega_ref - omega_ref_neigh) / max(omega_ref, omega_ref_neigh, 1e-6)
+                    if sep_ref > float(min_branch_sep_frac) and sep_now < 0.5 * float(min_branch_sep_frac):
+                        incoherent = True
+
+        if incoherent:
+            pred_msg = (
+                f", Δω/ω_pred={rel_jump_pred:.3f}"
+                if np.isfinite(rel_jump_pred)
+                else ""
+            )
+            struct_msg = ""
+            if (
+                max_struct_frac is not None
+                and mode_indices_tracked is not None
+                and omega_n is not None
+                and j < len(mode_indices_tracked)
+            ):
+                m_struct = int(mode_indices_tracked[j])
+                omega_n_arr = np.asarray(omega_n, dtype=float).ravel()
+                if 0 <= m_struct < omega_n_arr.size:
+                    struct_msg = (
+                        f", ω_struct_cap="
+                        f"{float(omega_n_arr[m_struct]) * float(max_struct_frac):.3f}"
+                    )
+            sep_msg = ""
+            if bool(check_neighbor_collapse) and f_out.size >= 2:
+                neigh = j - 1 if j > 0 else (j + 1 if j + 1 < f_out.size else None)
+                if neigh is not None:
+                    omega_neigh = float(f_out[neigh]) if np.isfinite(f_out[neigh]) else np.nan
+                    omega_ref_neigh = float(omega_ref_list[neigh]) if np.isfinite(omega_ref_list[neigh]) else np.nan
+                    if np.isfinite(omega_neigh) and np.isfinite(omega_ref_neigh):
+                        sep_now = abs(omega - omega_neigh) / max(omega, omega_neigh, 1e-6)
+                        sep_ref = abs(omega_ref - omega_ref_neigh) / max(omega_ref, omega_ref_neigh, 1e-6)
+                        sep_msg = f", sep_now={sep_now:.3f}, sep_ref={sep_ref:.3f}"
+            print(
+                f"  ✗ RFA branch {j} LOST (branch-incoherent): "
+                f"ω={omega:.3f} rad/s, ω_ref={omega_ref:.3f} rad/s, "
+                f"Δω/ω_ref={rel_jump:.3f}, MAC_prev={mac_prev:.3f}"
+                f"{pred_msg}{struct_msg}{sep_msg}"
+            )
+            g_out[j] = np.nan
+            f_out[j] = np.nan
+            e_out[j] = np.nan
+            mode_lost_flags[j] = True
+
+    return g_out, f_out, v_out, e_out, mode_lost_flags
+
+
 def _select_modes_by_mac(eigs_candidates, vecs_candidates, freqs_candidates,
                          eigs_all, vecs_all, freqs_previous, vecs_previous, n_modes,
                          n_structural_dof=None):
@@ -316,26 +1010,25 @@ def match_modes_between_velocities(eigs_current, vecs_current, freqs_current,
     
     Returns
     -------
-    reordering_indices : (n_modes,) int ndarray
-        Indices that reorder current modes to match previous step order.
-        result_reordered[i] = result_current[reordering_indices[i]]
-    mac_matrix : (n_modes, n_modes) ndarray
+    reordering_indices : (n_prev,) int ndarray
+        For each previous tracked branch j, index into the current candidate pool,
+        or -1 if unmatched.
+    mac_matrix : (n_curr, n_prev) ndarray
         MAC values between all current and previous mode pairs [i, j]
     matching_info : list of dicts
         Detailed information for each matched pair
     """
     from scipy.optimize import linear_sum_assignment
     
-    n_modes = len(eigs_current)
+    n_curr = len(eigs_current)
+    n_prev = len(eigs_previous)
     
-    # Build cost matrix (lower is better)
-    cost_matrix = np.zeros((n_modes, n_modes))
-    mac_matrix = np.zeros((n_modes, n_modes))
+    # Build rectangular cost matrix (n_curr x n_prev): current candidate pool vs tracked branches
+    cost_matrix = np.zeros((n_curr, n_prev))
+    mac_matrix = np.zeros((n_curr, n_prev))
     
-    for i in range(n_modes):  # current modes
-        for j in range(n_modes):  # previous modes
-            # MAC component
-            # Defensive: handle 1D arrays gracefully
+    for i in range(n_curr):
+        for j in range(n_prev):
             try:
                 u_curr = vecs_current[:, i] if vecs_current.ndim == 2 else vecs_current
                 u_prev = vecs_previous[:, j] if vecs_previous.ndim == 2 else vecs_previous
@@ -348,53 +1041,27 @@ def match_modes_between_velocities(eigs_current, vecs_current, freqs_current,
             mac_val = compute_mac(u_curr, u_prev, n_structural_dof=n_structural_dof)
             mac_matrix[i, j] = mac_val
             
-            # Frequency component (normalized error)
             freq_error = np.abs(freqs_current[i] - freqs_previous[j]) / (freqs_previous[j] + 1e-12)
-            
-            # Combined cost: penalize low MAC and high frequency deviation
             cost = w_freq * freq_error + w_mac * (1.0 - mac_val)
-            
-            # Apply hard constraint: skip candidates with large frequency deviation
             if freq_error > freq_margin:
                 cost = np.inf
-            
             cost_matrix[i, j] = cost
     
-    # Solve linear assignment problem (now handles rectangular matrices for variable n_modes)
-    n_prev = len(freqs_previous)
-    
-    # For rectangular case, we need to handle it differently
-    if n_modes != n_prev:
-        # Rectangular case: use rectangular cost matrix matching
-        cost_rect = np.full((n_modes, n_prev), np.inf)
-        for i in range(n_modes):
-            for j in range(n_prev):
-                cost_rect[i, j] = cost_matrix[i, j] if j < n_modes else np.inf
-        
-        try:
-            current_indices, prev_indices = linear_sum_assignment(cost_rect)
-        except ValueError as e:
-            if "infeasible" in str(e):
-                print(f"  [WARNING] Cost matrix infeasible. Using greedy MAC-based matching...")
-                current_indices, prev_indices = _greedy_mac_matching(mac_matrix[:, :n_prev], cost_rect, n_modes, n_prev)
-            else:
-                raise
-    else:
-        # Square case: standard linear assignment
-        try:
-            current_indices, prev_indices = linear_sum_assignment(cost_matrix)
-        except ValueError as e:
-            if "infeasible" in str(e):
-                print(f"  [WARNING] Cost matrix infeasible. Using greedy MAC-based matching...")
-                current_indices, prev_indices = _greedy_mac_matching(mac_matrix, cost_matrix, n_modes, n_modes)
-            else:
-                raise
+    try:
+        current_indices, prev_indices = linear_sum_assignment(cost_matrix)
+    except ValueError as e:
+        if "infeasible" in str(e):
+            print(f"  [WARNING] Cost matrix infeasible. Using greedy MAC-based matching...")
+            current_indices, prev_indices = _greedy_mac_matching(
+                mac_matrix, cost_matrix, n_curr, n_prev
+            )
+        else:
+            raise
     
     # Build reordering: for each previous mode, find its best match in current
     reordering_indices = np.full(n_prev, -1, dtype=int)
     for i_curr, i_prev in zip(current_indices, prev_indices):
-        cost_val = cost_matrix[i_curr, i_prev] if i_prev < n_modes else np.inf
-        if cost_val < np.inf:
+        if cost_matrix[i_curr, i_prev] < np.inf:
             reordering_indices[i_prev] = i_curr
     
     # Gather matching information for diagnostics
@@ -442,13 +1109,13 @@ def match_modes_between_velocities(eigs_current, vecs_current, freqs_current,
                 print(f"  ✗ Mode {i_prev}: UNMATCHED (freq={freqs_previous[i_prev]:.3f} rad/s)")
     
     # Report new modes (current modes not matched to any previous mode)
-    matched_current = set(current_indices[current_indices >= 0])
-    new_modes = [i for i in range(n_modes) if i not in matched_current]
+    matched_current = set(int(i) for i in current_indices if int(i) >= 0)
+    new_modes = [i for i in range(n_curr) if i not in matched_current]
     
     if new_modes and verbose:
         print(f"  [INFO] {len(new_modes)} new mode(s) detected at indices: {new_modes}")
         for i_new in new_modes:
-            best_mac = np.max(mac_matrix[i_new, :n_prev])
+            best_mac = np.max(mac_matrix[i_new, :])
             print(f"    → Mode {i_new}: f={freqs_current[i_new]:.3f} rad/s, best_MAC={best_mac:.3f}")
     
     return reordering_indices, mac_matrix, matching_info
@@ -601,8 +1268,9 @@ def diagnostic_mac_summary(mac_history, freqs_history, V_list, verbose=True):
     
     Parameters
     ----------
-    mac_history : list of (n_modes, n_modes) ndarray
-        MAC matrices at each velocity step (starting from V_2, since V_1 has no prev step)
+    mac_history : list of ndarray
+        MAC matrices at each velocity step (starting from V_2). Each matrix is
+        either square (n, n) or rectangular (n_candidates, n_tracked).
     freqs_history : list of (n_modes,) ndarray
         Frequencies at each velocity step
     V_list : array-like
@@ -627,21 +1295,28 @@ def diagnostic_mac_summary(mac_history, freqs_history, V_list, verbose=True):
     if len(mac_history) > 0:
         mac_diagonals = []
         for mac_mat in mac_history:
-            mac_diagonals.append(np.diag(mac_mat))
+            if mac_mat is None:
+                continue
+            if mac_mat.shape[0] == mac_mat.shape[1]:
+                mac_diagonals.append(np.diag(mac_mat))
+            else:
+                # Rectangular pool vs tracked branches: best MAC per tracked column
+                mac_diagonals.append(np.max(mac_mat, axis=0))
         
-        mac_diagonals = np.array(mac_diagonals)  # (n_velocities-1, n_modes)
-        mean_mac = np.mean(mac_diagonals, axis=0)
-        min_mac = np.min(mac_diagonals, axis=0)
-        
-        diagnostics['mean_mac_per_mode'] = mean_mac
-        diagnostics['min_mac_per_mode'] = min_mac
-        
-        if verbose:
-            print("\nMAC Tracking Quality Summary:")
-            print("=" * 70)
-            for mode_idx in range(n_modes):
-                print(f"  Mode {mode_idx}: mean_MAC={mean_mac[mode_idx]:.4f}, "
-                      f"min_MAC={min_mac[mode_idx]:.4f}")
+        mac_diagonals = np.array(mac_diagonals) if mac_diagonals else np.empty((0, n_modes))
+        if mac_diagonals.size > 0:
+            mean_mac = np.mean(mac_diagonals, axis=0)
+            min_mac = np.min(mac_diagonals, axis=0)
+
+            diagnostics['mean_mac_per_mode'] = mean_mac
+            diagnostics['min_mac_per_mode'] = min_mac
+
+            if verbose:
+                print("\nMAC Tracking Quality Summary:")
+                print("=" * 70)
+                for mode_idx in range(n_modes):
+                    print(f"  Mode {mode_idx}: mean_MAC={mean_mac[mode_idx]:.4f}, "
+                          f"min_MAC={min_mac[mode_idx]:.4f}")
     
     # Frequency continuity
     freq_jumps = []

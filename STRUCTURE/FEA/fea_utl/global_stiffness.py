@@ -10,8 +10,7 @@ def _save_global_matrix_to_csv(K_global, config):
     
     print(f"\n*** Saving global K matrix to CSV files ***")
     
-    # Create output directory: output_data/{config_name}/
-    output_dir = os.path.join(config.output_dir, config.name)
+    output_dir = config.output_dir
     os.makedirs(output_dir, exist_ok=True)
     
     config_name = config.name
@@ -29,7 +28,7 @@ def _save_global_matrix_to_csv(K_global, config):
     
     print(f"  Output directory: {output_dir}\n")
 
-def calculate_element_stiffness_matrix(sectional_stiffness, L):
+def calculate_element_stiffness_matrix(sectional_stiffness, L, physical=False):
     """
     Bauchau's linear formulation
     Ke = ∫ B(x)^T * C * B(x) dx
@@ -43,12 +42,21 @@ def calculate_element_stiffness_matrix(sectional_stiffness, L):
     for xi_hat, w in zip(gauss_pts, weights):
         # Map xi_hat from [-1, 1] to physical x in [0, L]
         x = (L / 2) * (xi_hat + 1)
-        B = calculate_B_matrix(x, L)
+        B = calculate_B_matrix(x, L, physical)
         Ke += B.T @ sectional_stiffness @ B * w * (L / 2)
 
     return Ke
 
-def calculate_B_matrix(x, L):
+def calculate_B_matrix(x, L, physical=False):
+    """physical=False (storico): le rotazioni di FLESSIONE sono pendenze
+    (theta_z = +du/dy, e nel taglio theta_x = -dw/dy), la torsione e' destrorsa.
+    Su una trave sola e' indifferente, ma dove travi non allineate condividono un
+    nodo (giunto a T) la stessa rotazione globale e' flessione per una e torsione
+    per l'altra e il segno si inverte. physical=True: tutte e tre le rotazioni
+    sono il vettore rotazione fisico (mano destra):
+        du/dy = -theta_z,  gamma_xy = du/dy + theta_z
+        dw/dy = +theta_x,  gamma_yz = dw/dy - theta_x
+    """
     B = np.zeros((6, 12))
     xi = x / L
 
@@ -64,13 +72,16 @@ def calculate_B_matrix(x, L):
     dH3 = (6*xi - 6*xi**2) / L
     dH4 = (-2*xi + 3*xi**2)
 
-    # --- γ_xy = du/dy - θz ---
+    # --- γ_xy = du/dy - θz ---   (physical: du/dy + θz, pendenza = -θz)
     B[0, 0]  = dH1
     B[0, 5]  = dH2
     B[0, 6]  = dH3
     B[0, 11] = dH4
     B[0, 5]  -= N1
     B[0, 11] -= N2
+    if physical:
+        B[0, 5] = -dH2 + N1
+        B[0, 11] = -dH4 + N2
 
     # --- ε_y = dv/dy ---
     B[1, 1] = dN1
@@ -83,6 +94,9 @@ def calculate_B_matrix(x, L):
     B[2, 9]  = dH4
     B[2, 3]  += N1   # Timoshenko: shear strain includes rotation
     B[2, 9]  += N2   # Timoshenko: shear strain includes rotation
+    if physical:      # γ_yz = dw/dy - θx, pendenza = +θx
+        B[2, 3] = dH2 - N1
+        B[2, 9] = dH4 - N2
 
     # --- κ_x = dθx/dy ---
     B[3, 3] = dN1
@@ -114,7 +128,8 @@ def assemble_global_stiffness_matrix(beam_model, config):
         T6 = T6_for_element(element, nodes)
         C_local = T6.T @ element_stiffness @ T6
 
-        Ke_local = calculate_element_stiffness_matrix(C_local, element_length)
+        Ke_local = calculate_element_stiffness_matrix(
+            C_local, element_length, bool(getattr(config, "beam_rotations_physical", False)))
 
         T12 = np.zeros((12, 12), dtype=float)
         T12[:6, :6] = T6

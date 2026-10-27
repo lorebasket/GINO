@@ -1,0 +1,426 @@
+% Compile from the FSI repository root:
+%   docs/resources/benchmarks/abramson1965_report/build_chapter_close_report.sh
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+
+\makeatletter
+\newcommand{\fsiroot}{}
+\newcommand{\fsipath}[1]{\fsiroot#1}
+\IfFileExists{output_data/ABRAMSON1965/vlambda_data.csv}{%
+  \def\fsiroot{}%
+}{%
+  \IfFileExists{../../../../output_data/ABRAMSON1965/vlambda_data.csv}{%
+    \def\fsiroot{../../../../}%
+  }{%
+    \PackageWarning{abramson1965}{Cannot locate FSI repo root; figures/CSV may be missing.}%
+  }%
+}
+\makeatother
+
+\geometry{margin=22mm}
+\sisetup{detect-all=true, per-mode=symbol}
+\DeclareSIUnit{\knunit}{knots}
+\DeclareSIUnit{\cps}{cps}
+\DeclareSIUnit{\ftunit}{ft}
+
+\title{ABRAMSON1965 --- chiusura capitolo\\[0.4em]
+\large Riproduzione idrodinamica, accoppiamento aero--struttura e campagna di validazione}
+\author{Report tecnico di lavoro --- FSI / lorebasket}
+\date{23 giugno 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Questo documento chiude il capitolo di lavoro sul benchmark idro-aeroelastico
+ABRAMSON1965 (Abramson \& Ransleben, 1965).
+Si riassume la \textbf{pipeline numerica} costruita (beam FE, DLM/PanelAero, Roger RFA,
+Capytaine BEM, strip theory, tracking modale), la \textbf{campagna di test} salvata in
+\texttt{output\_data/ABRAMSON1965/}, il \textbf{punto di arrivo} sulla riproduzione
+dell'idrodinamica e le \textbf{limitazioni} residue rispetto al flutter sperimentale
+(\SI{48.1}{\knunit}, $f\approx\SI{17.5}{\cps}$).
+La linea di riferimento operativa e' \texttt{RFA\_PK\_method} con massa aggiunta
+Capytaine in $M_\mathrm{eff}$; il gap dominante sul flutter resta lo
+smorzamento circolatorio DLM ($\mathrm{Im}(Q)$), non la sola massa aggiunta.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%==============================================================================
+\section{Riferimento sperimentale e obiettivo}
+%==============================================================================
+
+Il caso Abramson e' un idrofoil NACA 16-012 completamente immerso, cantilever,
+con mass ratio $\mu\approx 1$ e frequenze a secco $\approx\SI{10.5}{\hertz}$ (flessione)
+e $\approx\SI{20.6}{\hertz}$ (torsione).
+La rottura per flutter avviene a \textbf{\SI{48.1}{\knunit}} con frequenza accoppiata
+$\approx\SI{17.5}{\cps}$ e $(V/b\omega)_F\approx 1{,}48$.
+
+\paragraph{Obiettivo del capitolo.}
+Costruire una catena numerica riproducibile che:
+\begin{enumerate}[nosep]
+  \item riproduca modi secchi e parametri strutturali del paper;
+  \item integri idrodinamica potenziale (massa aggiunta e, opzionalmente, smorzamento radiativo)
+        via Capytaine o strip theory;
+  \item accoppi aerodinamica non stazionaria DLM in spazio modale $Q_\mathrm{modal}$;
+  \item produca diagrammi $V$--$g$, $V$--$f$, $V$--$\delta$ confrontabili con le Figure~5--6;
+  \item quantifichi sensibilita' a massa aggiunta, allineamento $x_{EA}$/aerogrid e
+        al fattore \texttt{aero\_im\_Q\_scale}.
+\end{enumerate}
+
+%==============================================================================
+\section{Architettura della pipeline}
+%==============================================================================
+
+\subsection{Flusso di calcolo}
+
+\begin{enumerate}[nosep]
+  \item \textbf{Struttura a secco:} beam 100 elementi $\to$ modi $\Phi$, $\hat{M},\hat{C},\hat{K}$,
+        Rayleigh $\zeta=0{,}03$ sui primi due modi.
+  \item \textbf{Idrodinamica:} Capytaine BEM su mesh VTU (4 modi) \emph{oppure} strip theory
+        proiettata su $\Phi$; $A_\infty$, $B_\infty$ in $M_\mathrm{eff}$, $C_\mathrm{eff}$.
+  \item \textbf{Aerodinamica:} $Q_{jj}(k)$ DLM precomputata; $Q_\mathrm{modal}(k)$ via
+        $Z$, $Z_{qs}$, $Z_\mathrm{force}$, $\Phi$.
+  \item \textbf{Flutter:} Roger RFA ($B_0,B_1,B_2,\,B_\mathrm{lag}$) + autovalori del sistema
+        aumentato; tracking MAC su due rami (bend/pitch).
+\end{enumerate}
+
+\subsection{Convenzione del solver (\texttt{RFA\_PK})}
+
+\[
+  M_\mathrm{eff} = \hat{M} + A_\infty,
+  \qquad
+  K_\mathrm{eff} = \hat{K} - \tfrac{1}{2}\rho V^2 B_0,
+  \qquad
+  C_\mathrm{eff} = \hat{C} - s_Q \tfrac{1}{2}\rho V B_1 + B_\infty + C_\mathrm{emp},
+\]
+con $s_Q=\texttt{aero\_im\_Q\_scale}$.
+La parte immaginaria di $Q$ alimenta $B_1$ e quindi lo smorzamento aerodinamico;
+$\mathrm{Re}(Q)$ entra in $B_0$ (rigidita' aerodinamica).
+Nel blocco bend--pitch accoppiato, \textbf{non} basta il segno delle diagonali
+$\mathrm{Re}(Q_{\alpha\alpha})$: le frequenze dei rami sono autovalori di un sistema
+$2\times2$ e dipendono anche da $\mathrm{Re}(Q_{h\alpha})$, $\mathrm{Re}(Q_{\alpha h})$.
+
+\subsection{Configurazione nominale}
+
+File: \texttt{examples/ABRAMSON1965/config\_ABRAMSON1965.py}.
+Parametri chiave: $x_{EA}/c=0{,}25$, $x_{CM}/c=0{,}512$, profondita' \SI{0.0508}{\meter},
+\texttt{num\_modes\_egv}=4, \texttt{num\_modes\_flutter\_egv}=2,
+\texttt{RFA\_PK\_method=True}, \texttt{rfa\_apply\_b2\_mass=False}.
+
+%==============================================================================
+\section{Campagna di test (\texttt{output\_data/ABRAMSON1965})}
+%==============================================================================
+
+Tutti i risultati sono organizzati sotto \texttt{output\_data/ABRAMSON1965/}.
+Ogni cartella contiene tipicamente \texttt{vg\_data.csv}, \texttt{vf\_data.csv},
+\texttt{vlambda\_data.csv}, \texttt{flutter\_summary.csv}, figure PNG e \texttt{run.log}.
+
+\subsection{Panoramica delle directory}
+
+\begin{table}[H]
+  \centering
+  \caption{Macro-aree della campagna numerica.}
+  \small
+  \begin{tabular}{p{3.6cm}p{9.8cm}}
+    \toprule
+    Directory & Contenuto \\
+    \midrule
+    \texttt{00\_baseline\_sensitivity} &
+    Confronto strip / Capytaine BEM / Capytaine striplike (stessa DLM, solo $M_\mathrm{hydro}$ cambia). \\
+    \texttt{01\_uncoupled\_rfa\_capytaine} &
+    Riferimento nominale $x_{EA}=x_{CM}$; aerogrid fissa; Capytaine BEM. \\
+    \texttt{02\_uncoupled\_xea\_xcm\_sweep} &
+    Sweep allineato $x_{EA}=x_{CM}\in\{0.20,0.22,0.38,0.40\}$; aerogrid decoupled a $0{,}25c$. \\
+    \texttt{alignment\_sweep} &
+    Sweep $x_{EA}$ con Capytaine per caso; varianti strip e DLM puro. \\
+    \texttt{input\_sensitivity} &
+    Perturbazioni singole ($\mu$, $EI$, $GJ$, $x_{EA}$, $\zeta$, scala strip$\to$Capytaine). \\
+    \texttt{measured\_q\_tests} &
+    Ibridi $\mathrm{Re}(Q)_\mathrm{DLM}+\mathrm{Im}(Q)_\mathrm{misurato}$, scale $\mathrm{Im}(Q)$. \\
+    \texttt{general\_results} & Run storiche PK/RFA+strip, scale \texttt{aero\_im\_Q\_scale}. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Baseline idroelastico (cartella \texttt{00\_baseline\_sensitivity})}
+
+Tre run con \textbf{stessa aerodinamica DLM} e tracking su due rami; cambia solo la
+proiezione della massa aggiunta in $M_\mathrm{hat}$:
+
+\begin{table}[H]
+  \centering
+  \caption{Flutter baseline RFA+PK (Capytaine in $M_\mathrm{eff}$, $\zeta=0{,}03$, $s_Q=1$).}
+  \label{tab:baseline-flutter}
+  \begin{tabular}{lcccl}
+    \toprule
+    Run & $V_F$ [kn] & Ramo & $f_F$ [Hz] & Modo instabile \\
+    \midrule
+  Sperimentale & 48.1 & --- & 17.5 & --- \\
+  \texttt{\_baseline\_rfa\_strip} & 32.4 & 1 & 11.9 & bend-like \\
+  \texttt{\_baseline\_rfa\_capytaine\_striplike} & 30.8 & 1 & 12.0 & bend-like \\
+  \texttt{\_baseline\_rfa\_capytaine} (BEM) & 37.7 & 2 & 11.8 & torsion-like \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Interpretazione.}
+La sola modifica della \textbf{distribuzione modale} di $A_\infty$ sposta quale ramo
+va in flutter per primo: con strip/striplike domina il bend (ramo~1); con Capytaine BEM
+($A_{22}\approx\SI{2.0}{\kilogram}$ sul pitch, $\approx 2{,}3\times$ strip) il pitch
+e' fortemente inerziale e fluttera il ramo~2.
+Non e' un cambio di $Q_{jj}$: e' \textbf{riorganizzazione dello spettro accoppiato}
+bend--torsione e del tracking MAC.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/00_baseline_sensitivity/_baseline_rfa_strip/vg_vf_combined.png}}
+    \caption{Strip}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/00_baseline_sensitivity/_baseline_rfa_capytaine_striplike/vg_vf_combined.png}}
+    \caption{Striplike}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/00_baseline_sensitivity/_baseline_rfa_capytaine/vg_vf_combined.png}}
+    \caption{Capytaine BEM}
+  \end{subfigure}
+  \caption{Baseline sensitivity: stesso solver, tre proiezioni di massa aggiunta.}
+  \label{fig:baseline-trio}
+\end{figure}
+
+\subsection{Massa aggiunta modale: strip, striplike, BEM}
+
+\begin{table}[H]
+  \centering
+  \caption{Diagonali $A_\infty$ modali [kg] sui primi quattro modi secchi
+  (\texttt{added\_mass\_projection\_comparison.json}, caso striplike).}
+  \label{tab:added-mass}
+  \begin{tabular}{lcccc}
+    \toprule
+    Fonte & Modo 0 & Modo 1 & Modo 2 & Modo 3 \\
+    \midrule
+    Strip theory & 0.516 & 0.878 & 0.140 & 0.186 \\
+    Capytaine striplike & 0.414 & 0.706 & 0.113 & 0.149 \\
+    Capytaine BEM & 0.198 & \textbf{1.994} & 0.374 & 0.363 \\
+    \midrule
+    BEM / strip (modo 1) & 0.38 & \textbf{2.27} & 2.67 & 1.95 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Il BEM 3D \textbf{abbassa} la massa aggiunta sul bend (modo~0) ma la \textbf{moltiplica}
+sul pitch (modo~1), con accoppiamenti off-diagonal non trascurabili
+($A_{12}\approx\SI{-0.48}{\kilogram}$ nella documentazione Capytaine).
+La proiezione striplike e' una via di mezzo fisicamente motivata per modi flesso-torsionali
+quando il BEM puro sovrastima l'inerzia torsionale.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.88\linewidth]{\fsipath{output_data/ABRAMSON1965/ABRAMSON1965_Madded_terms_vs_V_capytaine_vs_strip.png}}
+  \caption{Confronto termini di massa aggiunta modale (strip vs Capytaine).}
+\end{figure}
+
+\subsection{Sweep $x_{EA}=x_{CM}$ decoupled (\texttt{02\_uncoupled\_xea\_xcm\_sweep})}
+
+Quattro casi con aerogrid DLM fissa a $x_{EA}/c=0{,}25$ e barra strutturale spostata:
+\begin{itemize}[nosep]
+  \item \texttt{xea\_0p20}, \texttt{xea\_0p22} (verso prua);
+  \item \texttt{xea\_0p38}, \texttt{xea\_0p40} (verso poppa).
+\end{itemize}
+Per ogni caso: modi secchi $\to$ Capytaine BEM ricalcolato $\to$ RFA\_PK flutter.
+Con \texttt{num\_modes\_egv}=4 (pool di 4 radici, 2 rami tracciati), tutti e quattro i casi
+presentano \textbf{0/120 NaN} su Branch~2 in \texttt{vf\_data} (tracking continuo su tutto
+lo sweep fino a $V_\mathrm{max}=\SI{40}{\knunit}$). Nessun caso mostra attraversamento
+$g=0$ nel range di velocita' esplorato.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\linewidth]{\fsipath{output_data/ABRAMSON1965/02_uncoupled_xea_xcm_sweep/uncoupled_xea_xcm_sweep_panel.png}}
+  \caption{Pannello sweep $x_{EA}=x_{CM}$ con \texttt{num\_modes\_egv}=4: rami bend/pitch
+  continui su tutti i casi (prua e poppa).}
+\end{figure}
+
+\subsection{Altre campagne rilevanti}
+
+\begin{itemize}
+  \item \textbf{\texttt{input\_sensitivity/strip\_added\_mass\_scale}:}
+        interpolazione strip$\to$Capytaine; $V_F$ scende da $\sim\SI{33}{\knunit}$ (strip puro)
+        a $\sim\SI{24}{\knunit}$ (Capytaine pieno) --- coerente con maggiore inerzia sul pitch.
+  \item \textbf{\texttt{alignment\_sweep/xea\_sweep\_capytaine}:}
+        sweep fine verso poppa con Capytaine per caso; coalescenza modi $\Rightarrow$ criticita'
+        di tracking (PAS, \texttt{rfa\_pas\_allow\_coalescence}).
+  \item \textbf{\texttt{measured\_q\_tests}:}
+        sostituzione parziale di $\mathrm{Im}(Q)$ con coefficienti misurati Abramson;
+        scala \texttt{aero\_im\_Q\_scale} come knob fenomenologico.
+  \item \textbf{Report precedente} (\texttt{abramson1965\_current\_report.tex}):
+        confronto $\mathrm{Im}(Q_{bb})$ DLM vs $L_{hh}$ misurato ($\times 7$--$\times 12$ a basse $V$).
+\end{itemize}
+
+%==============================================================================
+\section{Fisica dell'accoppiamento e del flutter numerico}
+%==============================================================================
+
+\subsection{Ruolo di $\mathrm{Re}(Q)$ e $\mathrm{Im}(Q)$}
+
+\begin{itemize}[nosep]
+  \item $\mathrm{Re}(Q_{\alpha\alpha})>0$: softening aerodinamico $\Rightarrow$ tendenza a
+        \emph{abbassare} $\omega_\mathrm{wet}$ (non equivale a flutter).
+  \item $\mathrm{Im}(Q)$: smorzamento circolatorio; attraversamento $\gamma=0$ $\Leftrightarrow$ flutter.
+  \item Off-diagonal $\mathrm{Re}(Q_{h\alpha})$, $\mathrm{Im}(Q_{h\alpha})$: coalescenza
+        bend--torsione; determinano quale combinazione modale diventa instabile.
+\end{itemize}
+
+\subsection{Paradosso ``non conservativo'' vs flutter anticipato}
+
+La letteratura inviscida spesso \emph{sovrastima} $V_F$ (manca smorzamento viscoso stabilizzante).
+Nel codice il flutter e' \textbf{anticipato} perch\'e:
+\begin{enumerate}[nosep]
+  \item $\mathrm{Im}(Q)_\mathrm{DLM}$ in acqua ($\rho\approx 997$) genera $C_\mathrm{aero}$
+        molto piu' grande di $C_\mathrm{struct}$ ($\zeta=3\%$);
+  \item $C_\mathrm{hydro}\approx 0$ nella banda di flutter ($B_\infty\to 0$);
+  \item il paper usa coefficienti \textbf{misurati} (curva~3), non DLM puro.
+\end{enumerate}
+Con \texttt{aero\_im\_Q\_scale} $=0{,}5$ e $0{,}4$ si recupera rispettivamente
+$V_F\approx\SI{18}{\knunit}$ e $\approx\SI{31}{\knunit}$ (RFA+strip storico),
+avvicinando $f_F$ al valore sperimentale ma ancora lontano da \SI{48.1}{\knunit}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\linewidth]{\fsipath{output_data/ABRAMSON1965/00_baseline_sensitivity/_baseline_rfa_capytaine_striplike/stiffness_damping_contributions.png}}
+  \caption{Contributi $M/K/C$: dominanza di $C_\mathrm{aero}$ (B1) sul modo bend a $V$ crescenti.}
+\end{figure}
+
+%==============================================================================
+\section{Tracking modale e limiti numerici}
+%==============================================================================
+
+\subsection{Problema \texttt{mode\_lost} (pool a 2 radici)}
+
+Con \texttt{num\_modes\_egv}=2 il pool di autovalori oscillatori contiene solo due radici.
+Durante la coalescenza bend--pitch ($V\sim\SI{17}{\knunit}$), la radice pitch esce dal
+top-2 e ne entra una spuria ($\omega\sim\SI{36}{\radian\per\second}$, $\gamma\ll 0$):
+il MAC non trova corrispondenza $\Rightarrow$ Branch~2 \texttt{LOST} per $\sim$20 step
+$\Rightarrow$ buchi nei CSV \texttt{vf\_data}/\texttt{vg\_data}.
+
+\paragraph{Correzione adottata.}
+\texttt{num\_modes\_egv}=4 (pool di ricerca a 4 radici), \texttt{num\_modes\_flutter\_egv}=2
+(ancora due rami in output). Rerun completati su tutti e quattro i casi
+(\texttt{xea\_0p20}--\texttt{xea\_0p40}): \textbf{0/120 buchi} su Branch~2.
+
+\subsection{Altre limitazioni strutturali del modello}
+
+\begin{enumerate}
+  \item \textbf{Geometria DLM fissa:} nessun aggiornamento di $Q_{jj}$ con deformazione;
+        valido solo per piccole oscillazioni.
+  \item \textbf{Decoupling aerogrid:} negli sweep \texttt{02\_*} la griglia DLM resta a
+        $x_{EA}/c=0{,}25$ mentre la trave si sposta --- utile per sensitivita' strutturale,
+        non fisicamente coerente per confronto assoluto con Abramson.
+  \item \textbf{Capytaine:} profondita' finita, superficie libera a $z=0$; mesh resolution
+        warning a $\omega$ alte; $B(\omega)\approx 0$ in banda flutter.
+  \item \textbf{Roger RFA:} fit su griglia $k$ con errori residui fino a $\sim 30\%$ su
+        $\mathrm{Re}(Q)$; lag terms fino a $\sim 18\times \|B_0\|$.
+  \item \textbf{Proxy $\mathrm{Im}(Q)$ vs misurato:} confronto su $Q_{bb}$ vs $L_{hh}$ scalato,
+        non equivalenza strip completa del paper.
+  \item \textbf{Flutter ancora anticipato:} anche la migliore baseline Capytaine
+        ($\sim\SI{38}{\knunit}$) resta $\sim 20\%$ sotto il test.
+\end{enumerate}
+
+%==============================================================================
+\section{Punto di arrivo: cosa e' stato riprodotto}
+%==============================================================================
+
+\begin{table}[H]
+  \centering
+  \caption{Stato di riproduzione rispetto ad Abramson (1965).}
+  \label{tab:reproduction-status}
+  \begin{tabular}{p{4.2cm}cc}
+    \toprule
+    Aspetto & Stato & Nota \\
+    \midrule
+    Geometria e masse Tab.~1 & \textcolor{teal}{OK} & $b$, $L$, $\mu$, $EI$, $GJ$, $r_\alpha^2$ \\
+    Frequenze a secco & \textcolor{teal}{OK} & $\approx\SI{10.5}{Hz}$, $\approx\SI{20.6}{Hz}$ \\
+    Pipeline automatizzata & \textcolor{teal}{OK} & dry $\to$ Capytaine $\to$ RFA\_PK $\to$ post \\
+    Massa aggiunta 3 vie & \textcolor{teal}{OK} & strip / striplike / BEM confrontabili \\
+    Smorzamento radiativo $B(\omega)$ & \textcolor{teal}{OK} & calcolato; $\approx 0$ a flutter \\
+    Trend $f(V)$ coalescenza & \textcolor{teal}{OK} & qualitativo come Fig.~6 \\
+    $V_F$ assoluto & \textcolor{red}{Gap} & $\sim 31$--$38$ kn vs 48.1 kn \\
+    $\mathrm{Im}(Q)$ vs misurato & \textcolor{orange}{Parziale} & proxy $L_{hh}$; gap $\times 7$--$12$ \\
+    Coefficienti misurati curva~3 & \textcolor{orange}{Parziale} & test ibridi, non baseline \\
+    Viscosita' / superficie libera & \textcolor{red}{Assente} & DLM inviscido \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Configurazione raccomandata per studi successivi.}
+\begin{itemize}[nosep]
+  \item \texttt{RFA\_PK\_method=True}, Capytaine BEM o striplike a seconda del trade-off
+        inerzia torsionale;
+  \item \texttt{num\_modes\_egv=4}, \texttt{num\_modes\_flutter\_egv=2};
+  \item \texttt{rfa\_branch\_guard\_enable=True}, policy \texttt{stable};
+  \item per allineamento $V_F$: calibrare \texttt{aero\_im\_Q\_scale} e/o ibride
+        $\mathrm{Im}(Q)_\mathrm{misurato}$; non aspettarsi match con solo $A_\infty$.
+\end{itemize}
+
+%==============================================================================
+\section{Conclusioni}
+%==============================================================================
+
+Il capitolo ABRAMSON1965 ha portato a una \textbf{piattaforma idro-aeroelastica completa}:
+modi secchi verificati, idrodinamica potenziale da Capytaine con proiezione strip/striplike,
+accoppiamento DLM modale, solver Roger RFA con tracking MAC, e una campagna estesa di
+sensibilita' archiviata sotto \texttt{output\_data/ABRAMSON1965/}.
+
+Sul piano \textbf{idrodinamico}, la massa aggiunta modale e' stata riprodotta e confrontata
+su tre livelli; l'effetto sulla dinamica accoppiata e' \textbf{forte e asimmetrico} tra
+bend e pitch, spiegando l'inversione del ramo flutterante tra strip e Capytaine BEM.
+
+Sul piano \textbf{aerodinamico}, il gap residuo verso \SI{48.1}{\knunit} e' dominato da
+$\mathrm{Im}(Q)_\mathrm{DLM}$ troppo grande rispetto ai coefficienti oscillatori misurati,
+non da errori nella sola $A_\infty$.
+La correzione fenomenologica \texttt{aero\_im\_Q\_scale} e le matrici misurate sono le
+levette calibrate disponibili nel codice.
+
+Sul piano \textbf{numerico}, il tracking con pool a due radici era insufficiente in
+coalescenza; \texttt{num\_modes\_egv=4} risolve i buchi sui diagrammi $V$--$f$.
+
+\medskip
+\noindent\textbf{Chiusura.}
+Il benchmark e' \emph{riproducibile} e \emph{diagnosticabile}; non e' ancora \emph{predittivo}
+a $V_F$ sperimentale senza calibrazione di $\mathrm{Im}(Q)$.
+Il report tecnico di dettaglio su input, $\delta(V)$ e confronto Fig.~5--6 resta
+\texttt{abramson1965\_current\_report.tex}; la sensibilita' parametrica in
+\texttt{sensitivity\_rerun\_report.tex}.
+
+\appendix
+\section{Script e percorsi utili}
+
+\begin{itemize}[nosep]
+  \item Config: \texttt{examples/ABRAMSON1965/config\_ABRAMSON1965.py}
+  \item Sweep xea: \texttt{examples/ABRAMSON1965/run\_uncoupled\_xea\_xcm\_sweep.py}
+  \item Baseline: \texttt{examples/ABRAMSON1965/run\_baseline\_sensitivity.py}
+  \item Confronto $\mathrm{Im}(Q)$: \texttt{COUPLING/hydroelastic\_utl/abramson\_imq\_comparison.py}
+  \item Output root: \texttt{output\_data/ABRAMSON1965/}
+  \item Capytaine per caso: \texttt{FLUID/capytaine/ABRAMSON1965/}
+\end{itemize}
+
+\end{document}

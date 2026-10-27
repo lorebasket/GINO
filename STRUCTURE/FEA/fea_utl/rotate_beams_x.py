@@ -1,5 +1,5 @@
 """
-Rotate beam node positions and 6×6 sectional K/M about global +X (pitch).
+Rotate beam node positions and 6×6 sectional K/M about global +X (structural dihedral).
 
 Same DOF ordering as rotate_beams_y: translations then rotations, T = blkdiag(R, R).
 """

@@ -1,0 +1,5 @@
+framework,label,V_f_m_s,f_f_Hz
+sharpy,SHARPy UVLM (official nm8),163.76736555165633,11.249662830264352
+gino_wlsq,GINO-UVLM w_lsq (baseline),162.28312757201647,11.212703943770121
+gino_full_lsq,GINO-UVLM full_lsq (twist in C),150.57024423033835,10.760065978580627
+gino_sharpy_basis,GINO-UVLM SHARPy basis (Q conj-fixed),163.8126776577601,11.26005091483319

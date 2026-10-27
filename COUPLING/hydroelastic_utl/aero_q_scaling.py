@@ -18,6 +18,44 @@ def aero_im_Q_scale(config) -> float:
     return float(getattr(config, "aero_im_Q_scale", 1.0))
 
 
+def aero_real_flip(config) -> bool:
+    """Whether to negate Re(Q) when assembling the modal GAF from Qjj."""
+    if config is None:
+        return False
+    return bool(getattr(config, "aero_real_flip", False))
+
+
+def aero_imag_flip(config) -> bool:
+    """Whether to negate Im(Q) when assembling the modal GAF from Qjj."""
+    if config is None:
+        return False
+    return bool(getattr(config, "aero_imag_flip", False))
+
+
+def apply_aero_q_sign_flips(Q, config):
+    """
+    Apply ``aero_real_flip`` / ``aero_imag_flip`` to a modal GAF matrix.
+
+    Used in the PK ``Qg_func`` path and when building ``Q_modal`` data for
+    Roger RFA fitting, so stiffness (Re) and damping (Im) sign conventions
+    stay consistent across methods.
+    """
+    if config is None:
+        return Q
+    reflip = aero_real_flip(config)
+    imflip = aero_imag_flip(config)
+    if not reflip and not imflip:
+        return Q
+    Q = np.asarray(Q, dtype=complex)
+    re = np.real(Q)
+    im = np.imag(Q)
+    if reflip:
+        re = -re
+    if imflip:
+        im = -im
+    return re + 1j * im
+
+
 def scale_roger_lag_forcing(config) -> bool:
     """Whether ``aero_im_Q_scale`` should also multiply Roger lag-state forcing."""
     if config is None:
@@ -48,13 +86,18 @@ def log_aero_im_Q_scale_once(config, *, context: str = "") -> None:
     """Print scale notice once per analysis (guarded by config attribute)."""
     s = aero_im_Q_scale(config)
     lag_msg = ", lag forcing also scaled" if scale_roger_lag_forcing(config) else ""
-    if abs(s - 1.0) < 1e-14 and not lag_msg:
+    flip_msg = ""
+    if aero_real_flip(config):
+        flip_msg += ", Re(Q) flipped (aero_real_flip)"
+    if aero_imag_flip(config):
+        flip_msg += ", Im(Q) flipped (aero_imag_flip)"
+    if abs(s - 1.0) < 1e-14 and not lag_msg and not flip_msg:
         return
     if getattr(config, "_aero_im_Q_scale_logged", False):
         return
     msg = (
         f"[aero Im(Q) scale] aero_im_Q_scale={s:g} applied when assembling "
-        f"C_eff / C_aero{lag_msg} (RFA fit uses unscaled Q)."
+        f"C_eff / C_aero{lag_msg}{flip_msg} (RFA fit uses unscaled Q)."
     )
     if context:
         msg = f"{msg} ({context})"

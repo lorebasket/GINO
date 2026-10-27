@@ -4,9 +4,85 @@ import numpy as np
 import sys
 import os
 import importlib.util as _ilu
-from FEA.fea_utl.multibody_assembly import T6_from_beam_direction
+from FEA.fea_utl.multibody_assembly import (
+    T6_from_beam_direction,
+    orient_element_section_from_local,
+    rotate_beam_model_to_global,
+    translate_beam_model,
+)
+from FEA.fea_utl.beam_geometry import (
+    aerogrid_xea_factor,
+    beam_geometry_from_config,
+    beam_on_shear_center,
+    structural_xea_chordwise_offset,
+    xea_decoupled_from_aerogrid,
+)
 from FEA.fea_utl.beam_properties import create_beam_model
-from FEA.fea_utl.multibody_assembly import rotate_beam_model_to_global,translate_beam_model
+from FEA.fea_utl.rotate_beams_y import rotate_beam_model_y
+
+# Cases that use the uniform 6×6 custom section builder (unless overridden by config).
+_CUSTOM_STRUCTURAL_MODEL_NAMES = frozenset({
+    'ABRAMSON1965',
+    'Model1',
+    'Model2t',
+    'NACA0015_LiHua2020',
+})
+
+
+def _uses_custom_structural_model(config) -> bool:
+    """True when the case should use ``_build_structural_model_custom``."""
+    builder = getattr(config, 'structural_model_type', None)
+    if builder == 'custom':
+        return True
+    if builder is not None and builder != 'custom':
+        return False
+    return config.name in _CUSTOM_STRUCTURAL_MODEL_NAMES
+
+
+def _apply_mass_cg_coupling(M, mu, e, config=None):
+    """
+    Off-diagonal translational–rotational coupling from CG offset ``e`` along chord.
+
+    Default: M[2,4]=+μe, M[1,5]=-μe.
+    ``flip_mass_cg_coupling_sign=True`` inverts both; ``flip_mass_cg_coupling_24_sign=True`` only M[2,4].
+    """
+    flip_both = config is not None and getattr(config, 'flip_mass_cg_coupling_sign', False)
+    flip_24 = flip_both or (config is not None and getattr(config, 'flip_mass_cg_coupling_24_sign', False))
+    flip_15 = flip_both
+    c_wy = (-1.0 if flip_24 else 1.0) * (+float(mu) * float(e))
+    c_vz = (-1.0 if flip_15 else 1.0) * (-float(mu) * float(e))
+    M[1, 5] = c_vz
+    M[5, 1] = c_vz
+    M[2, 4] = c_wy
+    M[4, 2] = c_wy
+
+
+def _set_section_mass_at_reference(M, mu, e, *, i3, i4, i5, config=None):
+    """6×6 mass matrix at the beam reference node (EA / shear center).
+
+    Translational mass μ, rotational inertias ``i3,i4,i5`` on θx, θy, θz, and
+    CG offset ``e`` [m] along chord (+x = aft of SC).
+
+    Default (SHARPy Goland / EA-referenced): inertias are already at the
+    reference; offset mass enters via skew coupling only (no +μe² PAT).
+
+    Diagnostic: ``config.section_mass_add_mu_e2=True`` also adds μe² on θy/θz
+    (legacy GINO PAT on top of EA-referenced i11/i33 — double-counts vs SHARPy).
+    """
+    M[0, 0] = mu
+    M[1, 1] = mu
+    M[2, 2] = mu
+    _apply_mass_cg_coupling(M, mu, e, config)
+    pat = bool(config is not None and getattr(config, "section_mass_add_mu_e2", False))
+    pat_term = float(mu) * float(e) ** 2 if pat else 0.0
+    M[3, 3] = i3
+    M[4, 4] = i4 + pat_term
+    M[5, 5] = i5 + pat_term
+    if pat:
+        print(
+            f"  [section_mass_add_mu_e2] +μe²={pat_term:.6g} on θy/θz "
+            f"(legacy PAT; not SHARPy EA convention)"
+        )
 
 
 def build(config):
@@ -19,7 +95,21 @@ def build(config):
         config.paths['FEA']
     ])
 
-    if config.name == 'GOLAND':
+    # Aggancio generico: un caso nuovo che arriva da csv_export si dichiara con
+    # structural_model_type='sonata' invece di aggiungere un ramo per nome qui.
+    if getattr(config, 'structural_model_type', None) == 'sonata':
+        return _build_sonata_model(config)
+
+    if getattr(config, 'structural_model_type', None) == 'ac38_tfoil':
+        return _build_ac38_tfoil_model(config)
+
+    if getattr(config, 'structural_model_type', None) == 'tfoil_simple':
+        return _build_tfoil_simple_model(config)
+
+    if getattr(config, 'structural_model_type', None) == 'ac37_tfoil':
+        return _build_ac37_tfoil_model(config)
+
+    if config.name in ('GOLAND', 'GOLAND_water'):
         return _build_goland_model(config)
     elif config.name == 'GOLANDfullspan':
         return _build_goland_fullspan_model(config)
@@ -33,10 +123,12 @@ def build(config):
         return _build_sonata_model(config)
     elif config.name == 'tnz_multibody':
         return _build_tnz_multibody_model(config)
-    elif config.name == 'NACA0003':
+    elif config.name == 'Modelref2' or getattr(config, 'structural_model_type', None) == 'modelref2_tfoil':
+        return _build_modelref2_tfoil_model(config)
+    elif config.name in ('NACA0003', 'NACA0015_POM'):
         return _build_naca0003_model(config)
-    elif config.name == 'ABRAMSON1965':
-        return _build_abramson_model(config)
+    elif _uses_custom_structural_model(config):
+        return _build_structural_model_custom(config)
     else:
         raise NotImplementedError(f"Structural model build not implemented for {config.name}")
 
@@ -51,10 +143,7 @@ def _build_naca0003_model(config):
     frequency f₁,vac = 321 Hz (Cupr et al. 2018) for the double-clamped
     configuration.
     """
-    from FEA.fea_utl.rotate_beams_y import rotate_beam_model_y
-    from FEA.fea_utl.beam_properties import create_beam_model
- 
-    print("Building NACA0003 structural model from airfoil geometry")
+    print(f"Building {config.name} structural model from airfoil geometry")
  
     # =========================================================================
     # 1.  CONFIGURATION PARAMETERS  (read-only, all come from config.py)
@@ -67,7 +156,6 @@ def _build_naca0003_model(config):
     v_poisson   = config.v              # Poisson's ratio                  [–]
     beam_length = config.beam_length    # Full span (clamped-clamped)      [m]
     chord       = config.chord          # Chord length                     [m]
-    pitch       = config.pitch          # Pitch angle                      [deg]
     raw_coords  = config.raw            # Normalised airfoil coords (N×2)
     n_elements  = config.n_elements     # Number of beam elements
  
@@ -173,9 +261,9 @@ def _build_naca0003_model(config):
     print(f"    i33 = {i33:.6e} kg·m")
  
     # =========================================================================
-    # 5.  EIxx CALIBRATION – FIX 3
-    f1_vac_target = 321.0          # Hz  — Cupr et al. 2018
-    beta1L        = 4.7300         # dimensionless — clamped-clamped mode 1
+    # 5.  EIxx CALIBRATION – match target dry 1st bending frequency
+    f1_vac_target = float(getattr(config, 'f1_vac_target', 321.0))
+    beta1L        = float(getattr(config, 'beta1L', 4.7300))
     omega1_target = 2.0 * np.pi * f1_vac_target
  
     EIxx_geom = EIxx               # geometry-only estimate (for reporting)
@@ -187,9 +275,10 @@ def _build_naca0003_model(config):
     Ixx_cal = EIxx / E
     i33     = rho_s * Ixx_cal     # keep mass rotational inertia consistent
  
+    calib_ref = getattr(config, 'f1_vac_reference', None) or config.name
     print(f"\n  ── EIxx frequency calibration ─────────────────────────────")
-    print(f"    f₁,vac target  = {f1_vac_target:.1f} Hz  (Cupr et al. 2018)")
-    print(f"    β₁L            = {beta1L}  (clamped-clamped first mode)")
+    print(f"    f₁,vac target  = {f1_vac_target:.1f} Hz  ({calib_ref})")
+    print(f"    β₁L            = {beta1L}")
     print(f"    EIxx geometry  = {EIxx_geom:.4e} N·m²  (solid section)")
     print(f"    EIxx calibrated= {EIxx:.4e} N·m²")
     print(f"    Calibration k  = {k_calib:.4f}  (solid overpredicts by {1/k_calib:.2f}×)")
@@ -230,35 +319,23 @@ def _build_naca0003_model(config):
         K_i[5, 5] = EIyy   # edgewise bending  (geometric)
         K_dict[f"e{idx}"] = K_i
  
-        # ── Mass (6×6) ───────────────────────────────────────────────────────
+        # ── Mass (6×6) at EA ─────────────────────────────────────────────────
         M_i = np.zeros((6, 6), float)
-        M_i[0, 0] = mu
-        M_i[1, 1] = mu
-        M_i[2, 2] = mu
-        # EA-CG offset coupling (zero for symmetric NACA0003)
-        M_i[1, 5] = -mu * e_x
-        M_i[5, 1] = -mu * e_x
-        M_i[2, 4] = +mu * e_x
-        M_i[4, 2] = +mu * e_x
-        # Rotational inertias at elastic axis (= centroid for symmetric foil)
-        M_i[3, 3] = i11
-        M_i[4, 4] = i22 + mu * e_x**2
-        M_i[5, 5] = i33 + mu * e_x**2
+        _set_section_mass_at_reference(
+            M_i, mu, e_x, i3=i11, i4=i22, i5=i33, config=config,
+        )
         M_dict[f"e{idx}"] = M_i
  
     # =========================================================================
     # 7.  ASSEMBLE BEAM MODEL
     # =========================================================================
-    pitch = getattr(config, 'pitch', 0)
- 
     beam_model = create_beam_model(
         K_dict, M_dict,
-        beam_length, n_elements, pitch,
+        beam_length, n_elements,
+        **beam_geometry_from_config(config),
         agard_theory=True,
         flutter_benchmark=False,
         sonata=False,
-        center_beam=True,
-        chord=chord,
     )
  
     alpha_deg = getattr(config, 'alpha_deg', 0.0)
@@ -292,7 +369,7 @@ def _build_naca0003_model(config):
     total_mass = mu * beam_length               # Total mass [kg]
     total_weight = total_mass * g               # Total weight [N]
     
-    print(f"\nNACA0003 beam built: {n_elements} elements  span={beam_length:.3f} m")
+    print(f"\n{config.name} beam built: {n_elements} elements  span={beam_length:.3f} m")
     print(f"  Total structural mass : {total_mass:.4f} kg")
     print(f"  Total structural weight: {total_weight:.4f} N  ({total_weight/g:.4f} kgf)")
  
@@ -307,7 +384,7 @@ def _build_naca0003_model(config):
 
     if save_flag:
         matrices_dir = getattr(config, 'matrices_dir',
-                               os.path.join(config.output_dir, config.name))
+                               config.output_dir)
         os.makedirs(matrices_dir, exist_ok=True)
 
         model_name = config.name
@@ -327,12 +404,227 @@ def _build_naca0003_model(config):
     return beam_model
 
 
-def _build_abramson_model(config):
-    
-    from FEA.fea_utl.rotate_beams_y import rotate_beam_model_y
-    from FEA.fea_utl.beam_properties import create_beam_model
-    
-    print(f"Building ABRAMSON structural model")
+def _build_modelref2_tfoil_model(config):
+    """
+    Strut of Reference 2 with inverted-T pod and foils (Besch & Liu 1973, Fig. 21–22).
+
+    Assembly:
+      1. Swept cantilever strut (Table 2 section properties).
+      2. Two horizontal foil beams (±X from the strut tip) with distributed foil mass.
+      3. Punctual pod mass at the strut tip node (``config.tip_mass`` / ``tip_mass_inertia``).
+
+    Hydrodynamic added mass on pod/foils is handled separately in Capytaine (superposition).
+    """
+    from FEA.fea_utl.multibody_assembly import assemble_multibody, orient_element_section_from_local
+
+    print(f"Building Modelref2 inverted-T structural model: {config.name}")
+
+    K = np.zeros((6, 6), float)
+    K[0, 0] = config.GAx
+    K[1, 1] = config.EA
+    K[2, 2] = config.GAz
+    K[3, 3] = config.EIxx
+    K[4, 4] = config.GJ
+    K[5, 5] = config.EIzz
+
+    xcm = config.xcm_factor * (config.chord / np.cos(np.deg2rad(config.sweep_angle_deg)))
+    xsc = config.xea_factor * (config.chord / np.cos(np.deg2rad(config.sweep_angle_deg)))
+    e = xcm - xsc
+    on_sc = beam_on_shear_center(config)
+    geo = beam_geometry_from_config(config)
+    print(
+        f"  Strut: L={config.beam_length:.4f} m, c={config.chord:.4f} m, "
+        f"Λ={config.sweep_angle_deg:.1f}°, μ={config.mu:.4f} kg/m"
+    )
+    print(
+        f"  xsc={xsc:.6f} m ({config.xea_factor:.3f}·c); "
+        f"xcm={xcm:.6f} m ({config.xcm_factor:.3f}·c); e={e:.6f} m"
+    )
+
+    i11 = config.I_alpha / config.beam_length
+    i22 = config.k_i22 * i11
+    i33 = config.k_i33 * i11
+    M = np.zeros((6, 6), float)
+    _set_section_mass_at_reference(
+        M, config.mu, e, i3=i22, i4=i11, i5=i33, config=config,
+    )
+
+    beam_strut = create_beam_model(
+        K,
+        M,
+        config.beam_length,
+        config.n_elements,
+        **geo,
+        cg_offset_e=e,
+        beam_on_shear_center=on_sc,
+        section_axes_along_global_span=bool(
+            getattr(config, "section_axes_along_global_span", False)
+        ),
+        agard_theory=False,
+        flutter_benchmark=True,
+        sonata=False,
+    )
+    alpha_deg = float(getattr(config, "alpha_deg", 0.0))
+    beam_strut = rotate_beam_model_y(beam_strut, [alpha_deg])
+
+    sm_strut = {
+        "nodes": [{**n, "submodel": "strut_ref2"} for n in beam_strut["nodes"]],
+        "elements": beam_strut["elements"],
+    }
+    tip_pos = np.array(sm_strut["nodes"][-1]["position"], dtype=float)
+    print(f"  Strut tip (foil junction): {tip_pos}")
+
+    # ── Horizontal foil beams (±X, chord in Z) ───────────────────────────────
+    L_foil = float(getattr(config, "foil_semi_span", 0.0))
+    n_foil_el = int(getattr(config, "n_elements_foil", 8))
+    mu_foil = float(getattr(config, "mu_foil", 0.0))
+    foil_chord = float(getattr(config, "foil_root_chord", config.chord))
+    ei_scale = float(getattr(config, "foil_EI_scale", 1.0))
+
+    if bool(getattr(config, "foil_reuse_strut_section", False)):
+        # Literal reuse of the strut's own K/M section (same EIxx, GJ, mu,
+        # I_alpha, xea/xcm) on the foil beams -- foil_root_chord/foil_EI_scale/
+        # mu_foil above are not used for stiffness/mass in this branch (kept
+        # only for the aerodynamic planform / documentation).
+        K_foil = K
+        M_foil = M
+        print("  Foils: reusing strut section (K, M) verbatim (foil_reuse_strut_section=True)")
+    else:
+        foil_EA = 70e9 * foil_chord * 0.15 * foil_chord * ei_scale
+        foil_EI = foil_EA * foil_chord**2 / 12.0
+        foil_GJ = foil_EI
+
+        K_foil = np.zeros((6, 6), float)
+        K_foil[0, 0] = foil_EA * 1e3
+        K_foil[1, 1] = foil_EA
+        K_foil[2, 2] = foil_EA * 1e3
+        K_foil[3, 3] = foil_EI
+        K_foil[4, 4] = foil_GJ
+        K_foil[5, 5] = foil_EI
+
+        i_foil = mu_foil * foil_chord**2 / 12.0
+        M_foil = np.zeros((6, 6), float)
+        M_foil[0, 0] = mu_foil
+        M_foil[1, 1] = mu_foil
+        M_foil[2, 2] = mu_foil
+        M_foil[3, 3] = i_foil / 2.0
+        M_foil[4, 4] = i_foil
+        M_foil[5, 5] = i_foil / 2.0
+
+    # Horizontal foils in the reference frame: span along ±Z (→ lateral ±Y after the
+    # −90° structural dihedral about +X), chord along +X (streamwise), thin along Y.
+    # Leading-edge / elastic-axis sweep per Fig. 22 (constant chord → EA sweep = LE
+    # sweep): as the foil runs outboard (|z|↑) the elastic axis moves aft (+X).
+    foil_sweep = float(getattr(config, "foil_sweep_deg", 0.0))
+    tan_sweep = np.tan(np.deg2rad(foil_sweep))
+    chord_dir = np.array([1.0, 0.0, 0.0], dtype=float)
+    thick_dir = np.array([0.0, 1.0, 0.0], dtype=float)
+
+    def _foil_submodel(sign: float, name: str):
+        nodes = []
+        elements = []
+        for i in range(n_foil_el + 1):
+            s = (i / n_foil_el) * L_foil            # lateral (span) coordinate ≥ 0
+            pos = tip_pos + np.array([s * tan_sweep, 0.0, sign * s], dtype=float)
+            nodes.append({"position": pos.tolist(), "index": i, "submodel": name})
+        for i in range(n_foil_el):
+            elem = {
+                "nodes": [i, i + 1],
+                "length": L_foil / n_foil_el,
+            }
+            orient_element_section_from_local(
+                elem,
+                nodes[i]["position"],
+                nodes[i + 1]["position"],
+                K_foil,
+                M_foil,
+                chord_direction_global=chord_dir,
+                thickness_direction_global=thick_dir,
+            )
+            elements.append(elem)
+        return {"nodes": nodes, "elements": elements}
+
+    # Incremental-validation switches (Besch & Liu Fig 15a/b/c): build strut only,
+    # strut+pod, or the full T-foil from the same code path. Both default True.
+    include_foils = bool(getattr(config, "modelref2_include_foils", True))
+    include_pod = bool(getattr(config, "modelref2_include_pod", True))
+
+    if include_foils:
+        sm_foil_port = _foil_submodel(+1.0, "foil_port")
+        sm_foil_stbd = _foil_submodel(-1.0, "foil_starboard")
+        submodels = [sm_strut, sm_foil_port, sm_foil_stbd]
+        sub_names = ["strut_ref2", "foil_port", "foil_starboard"]
+    else:
+        submodels = [sm_strut]
+        sub_names = ["strut_ref2"]
+        print("  [modelref2_include_foils=False] strut-only structure (no foils)")
+
+    beam_model = assemble_multibody(submodels, tol=1e-7)
+    beam_model["is_multibody"] = True
+    beam_model["sub_beam_names"] = sub_names
+    beam_model["K_section"] = K
+    beam_model["M_section"] = M
+    beam_model["geometry"] = dict(beam_strut.get("geometry", {}))
+    beam_model["geometry"]["beam_on_shear_center"] = on_sc
+    beam_model["geometry"]["xsc_factor"] = float(config.xea_factor)
+    beam_model["geometry"]["xcm_factor"] = float(config.xcm_factor)
+
+    tip_idx = None
+    for idx, node in enumerate(beam_model["nodes"]):
+        if np.linalg.norm(np.asarray(node["position"], float) - tip_pos) < 1e-9:
+            tip_idx = idx
+            break
+    if tip_idx is None:
+        tip_idx = len(beam_model["nodes"]) - 1
+
+    tip_mass = float(getattr(config, "tip_mass", 0.0) or 0.0)
+    if not include_pod:
+        tip_mass = 0.0
+        print("  [modelref2_include_pod=False] no tip pod point mass")
+    if tip_mass > 0.0:
+        inertia_cfg = getattr(config, "tip_mass_inertia", None)
+        inertia = (
+            np.diag(np.asarray(inertia_cfg, dtype=float)) if inertia_cfg is not None else None
+        )
+        offset_cfg = getattr(config, "tip_mass_offset", None)
+        offset = (
+            tuple(float(v) for v in offset_cfg) if offset_cfg is not None else (0.0, 0.0, 0.0)
+        )
+        beam_model["point_masses"] = [
+            {
+                "node_index": tip_idx,
+                "mass": tip_mass,
+                "inertia": inertia,
+                "offset": offset,
+            }
+        ]
+        print(
+            f"  Pod point mass: {tip_mass:.4f} kg at node {tip_idx} "
+            f"(CG offset={offset} m)"
+        )
+
+    print(
+        f"Modelref2 T-foil assembled: {len(beam_model['nodes'])} nodes, "
+        f"{len(beam_model['elements'])} elements "
+        f"(strut {config.n_elements} + foils 2×{n_foil_el})"
+    )
+    return beam_model
+
+
+def _build_structural_model_custom(config):
+    """
+    General uniform-span structural model from config section properties.
+
+    Builds 6×6 ``K`` and ``M`` with DOF order ``[u,v,w,θx,θy,θz]`` (u chord, v span, w thick).
+    Per-element ``T6`` maps them to global (swept elastic axis by default, or fixed +Y when
+    ``section_axes_along_global_span``). Planform sweep / EA offset via ``beam_geometry_from_config``;
+    optional angle of attack about +Y. Structural dihedral about +X is applied later in ``main.py``.
+
+    Used for Abramson-style hydrofoil / wing-tunnel cases (``Model1``, ``ABRAMSON1965``,
+    ``Model2-bluntbased``, …) when ``structural_model_type == 'custom'`` or the case name
+    is listed in ``_CUSTOM_STRUCTURAL_MODEL_NAMES``.
+    """
+    print(f"Building custom structural model: {config.name}")
 
     # DOF ordering: [u, v, w, θx, θy, θz] where Y is the beam axis
     # u: displacement in X, v: displacement in Y (axial), w: displacement in Z
@@ -345,60 +637,131 @@ def _build_abramson_model(config):
     K[4, 4] = config.GJ  # Torsional stiffness (rotation along Y - beam axis)
     K[5, 5] = config.EIzz # Bending stiffness about Z
 
-    xcm = config.xcm_factor * config.chord
-    xea = config.xea_factor * config.chord
-    e = (xcm - xea)  # Offset in X direction: positive if CG is aft of EA
-    #e = 0
-    
-    # DOF ordering: [u, v, w, θx, θy, θz] where Y is the beam axis (spanwise)
+    # Accoppiamento flesso-torsionale (composite bend-twist tailoring).
+    # psi = K_bt / sqrt(EIxx*GJ), adimensionale; |psi| < 1 e' richiesto perche'
+    # il blocco 2x2 resti definito positivo. E' l'equivalente, in un modello a
+    # trave dritta, della freccia: psi > 0 da' WASH-IN (flette su -> naso su,
+    # destabilizzante, come freccia in avanti), psi < 0 da' WASH-OUT.
+    # Si attiva solo se il config lo espone: gli altri casi restano intatti.
+    _psi = float(getattr(config, "bend_twist_psi", 0.0) or 0.0)
+    if abs(_psi) > 1e-12:
+        if abs(_psi) >= 1.0:
+            raise ValueError(
+                f"bend_twist_psi={_psi} non ammissibile: serve |psi|<1 perche' "
+                "il blocco flessione-torsione resti definito positivo"
+            )
+        _kbt = _psi * np.sqrt(config.EIxx * config.GJ)
+        K[3, 4] = _kbt
+        K[4, 3] = _kbt
+        print(f"  bend-twist coupling: psi={_psi:+.3f} -> K_bt={_kbt:.4g} N m^2 "
+              f"({'WASH-IN (tipo freccia avanti)' if _psi > 0 else 'WASH-OUT'})")
+
+    xcm = config.xcm_factor * (config.chord / np.cos(np.deg2rad(config.sweep_angle_deg)))
+    xsc = config.xea_factor * (config.chord / np.cos(np.deg2rad(config.sweep_angle_deg)))
+    e = (xcm - xsc)  # CG offset from shear center along local chord (u); positive if CG is aft of SC
+    on_sc = beam_on_shear_center(config)
+    axis_label = "shear center" if on_sc else "beam reference"
+    geo = beam_geometry_from_config(config)
+    print(
+        f"  Beam nodes on {axis_label} "
+        f"(root x={geo['beam_axis_x_offset']:.6f} m); "
+        f"xsc={xsc:.6f} m from LE ({config.xea_factor:.3f}·c); "
+        f"xcm={xcm:.6f} m from LE ({config.xcm_factor:.3f}·c); "
+        f"CG offset e={e:.6f} m from SC in section M only"
+    )
+    if xea_decoupled_from_aerogrid(config):
+        print(
+            f"  decouple_xea_from_aerogrid: aerogrid fixed at aerogrid_xea_factor="
+            f"{aerogrid_xea_factor(config):.3f}; "
+            f"beam chordwise shift Δx={structural_xea_chordwise_offset(config):.6f} m"
+        )
+
     M = np.zeros((6, 6), float)
-    M[0, 0] = config.mu  # mass for u (chordwise X)
-    M[1, 1] = config.mu  # mass for v (axial Y, span)
-    M[2, 2] = config.mu  # mass for w (vertical Z)
 
-    # Off-diagonal coupling from -mu*skew(r), r = [e, 0, 0]
-    M[1, 5] = -config.mu * e   # F_v ↔ M_θz
-    M[5, 1] = -config.mu * e
-    M[2, 4] = +config.mu * e   # F_w ↔ M_θy
-    M[4, 2] = +config.mu * e
+    if config.radius_gyration is not None:
+        r2 = config.radius_gyration
+        b = config.chord / 2
+        r2_dim = r2 * (b**2)
 
-    # Rotational inertias AT EA (CG values + Huygens-Steiner where needed)
-    # config.radius_gyration is r_α² in [m²], NOT a dimensionless ratio
-    # Polar inertia per unit span: I_p = μ × r_α²
-    # Note: r_α² already includes geometric scaling, do NOT multiply by b²
-    r2 = config.radius_gyration       # value in unit of semichord (nondimensional)
-    b = config.chord / 2              # semichord
-    r2_dim = r2 *(b**2)                     # DImensionally consistent with μ in kg/m → I_p in kg·m
-    thickness = config.thickness_factor * config.chord
+        i11 = config.mu * r2_dim
+        i22 = config.k_i22 * i11
+        i33 = config.k_i33 * i11
+        print(f"  Rotational inertia from r_α²={r2:.4f} (semichords): i11={i11:.4e} kg·m")
 
-    i11 = config.mu * r2_dim              # [kg·m]  polar inertia about elastic axis (torsion)
-    i22 = config.k_i22 * i11          # [kg·m]  scaled component (chordwise bending)
-    i33 = config.k_i33 * i11          # [kg·m]  scaled component (vertical bending)
-    #i22 = config.mu * (thickness / 2)**2 / 12
-    #i33 = config.mu * (config.chord)**2 / 12
+    elif config.I_alpha is not None:
+        i11 = config.I_alpha / config.beam_length
+        i22 = config.k_i22 * i11
+        i33 = config.k_i33 * i11
+        print(
+            f"  Rotational inertia from I_α={config.I_alpha} "
+            f"i11={i11:.4e} kg·m"
+        )
+    else:
+        raise ValueError(
+            f"{config.name}: set either radius_gyration or I_alpha for section rotational inertia"
+        )
 
-    M[3, 3] = i22                        # θx (chordwise bending)
-    M[4, 4] = i11 + config.mu * e**2                       # θy (torsion about span)
-    M[5, 5] = i33 + config.mu * e**2                      # θz (vertical bending)
+    _set_section_mass_at_reference(
+        M, config.mu, e, i3=i22, i4=i11, i5=i33, config=config,
+    )
 
-    # Reference layout: always use pitch=0 in create_beam_model; blade inclination
-    # is applied afterward as a rigid rotation of the whole beam model about +X.
+    # Reference layout at build; structural dihedral about +X is applied in main.py.
     beam_model = create_beam_model(
-        K, M, config.beam_length, config.n_elements, 0,
-        agard_theory=False, flutter_benchmark=True, sonata=False,
-        xea=xea, xcm=xcm, case_name='ABRAMSON1965'
+        K, M, config.beam_length, config.n_elements,
+        **geo,
+        cg_offset_e=e,
+        beam_on_shear_center=on_sc,
+        section_axes_along_global_span=bool(
+            getattr(config, "section_axes_along_global_span", False)
+        ),
+        agard_theory=False,
+        flutter_benchmark=True,
+        sonata=False,
     )
 
     alpha_deg = float(getattr(config, "alpha_deg", 0.0))
     beam_model = rotate_beam_model_y(beam_model, [alpha_deg])
 
     # Section 6×6 and mesh stay in the reference frame (beam along +Y after create);
-    # structural pitch about +X is applied after global K/M and aerogrid are built
-    # (see post_pitch_utils.apply_structural_pitch_about_x in main.py).
+    # structural dihedral about +X is applied after global K/M and aerogrid are built
+    # (see post_dihedral_utils.apply_structural_dihedral_about_x in main.py).
     beam_model["K_section"] = K
     beam_model["M_section"] = M
+    beam_model["geometry"]["beam_on_shear_center"] = on_sc
+    beam_model["geometry"]["xsc_factor"] = float(config.xea_factor)
+    beam_model["geometry"]["xcm_factor"] = float(config.xcm_factor)
+    beam_model["geometry"]["decouple_xea_from_aerogrid"] = xea_decoupled_from_aerogrid(config)
+    if xea_decoupled_from_aerogrid(config):
+        beam_model["geometry"]["aerogrid_xea_factor"] = float(aerogrid_xea_factor(config))
     if abs(alpha_deg) > 1e-12:
-        print(f"  ABRAMSON1965: applied alpha {alpha_deg:.4f} deg about +Y on beam model (reference build).")
+        print(f"  {config.name}: applied alpha {alpha_deg:.4f} deg about +Y on beam model (reference build).")
+
+    # ── Optional concentrated tip mass (config.tip_mass [kg]) ────────────────
+    # Registered in beam_model['point_masses']; structural_analysis adds it to
+    # the free-end node in M_global. Optional:
+    #   config.tip_mass_inertia = (Ixx, Iyy, Izz) [kg·m²] about the tip-mass CG,
+    #       build reference frame (X chord +aft, Y span, Z thickness);
+    #   config.tip_mass_offset  = (rx, ry, rz) [m] node → CG (e.g. pod CG aft
+    #       of the elastic axis → positive rx). Unbalance coupling and
+    #       parallel-axis terms are assembled in structural_analysis.
+    tip_mass = float(getattr(config, 'tip_mass', 0.0) or 0.0)
+    if tip_mass > 0.0:
+        tip_idx = len(beam_model['nodes']) - 1
+        inertia_cfg = getattr(config, 'tip_mass_inertia', None)
+        inertia = (np.diag(np.asarray(inertia_cfg, dtype=float))
+                   if inertia_cfg is not None else None)
+        offset_cfg = getattr(config, 'tip_mass_offset', None)
+        offset = (tuple(float(v) for v in offset_cfg)
+                  if offset_cfg is not None else (0.0, 0.0, 0.0))
+        beam_model['point_masses'] = [{
+            'node_index': tip_idx,
+            'mass':       tip_mass,
+            'inertia':    inertia,
+            'offset':     offset,
+        }]
+        print(f"  Tip point mass: {tip_mass:.3f} kg at free-end node {tip_idx} "
+              f"(pos={beam_model['nodes'][tip_idx]['position']}), CG offset={offset} m"
+              + (f", inertia diag (about CG)={inertia_cfg}" if inertia_cfg is not None else ""))
     
     # Optionally save the section stiffness and mass matrices to CSV files.
     # Controlled by config.save_matrices (bool). If True, matrices are written
@@ -410,7 +773,7 @@ def _build_abramson_model(config):
 
     if save_flag:
         matrices_dir = getattr(config, 'matrices_dir',
-                               os.path.join(config.output_dir, config.name))
+                               config.output_dir)
         os.makedirs(matrices_dir, exist_ok=True)
 
         model_name = config.name
@@ -431,10 +794,6 @@ def _build_abramson_model(config):
 
 
 def _build_goland_model(config):
-    
-    from FEA.fea_utl.rotate_beams_y import rotate_beam_model_y
-    from FEA.fea_utl.beam_properties import create_beam_model
-    
     print(f"Building GOLAND structural model")
 
     # DOF ordering: [u, v, w, θx, θy, θz] where Y is the beam axis
@@ -448,37 +807,64 @@ def _build_goland_model(config):
     K[4, 4] = config.GJ  # Torsional stiffness (rotation along Y - beam axis)
     K[5, 5] = config.EIzz # Bending stiffness about Z
 
+    # Accoppiamento flesso-torsionale (composite bend-twist tailoring):
+    # psi = K_bt/sqrt(EIxx*GJ), |psi|<1 per definita positivita'. Equivalente,
+    # su trave dritta, della freccia: psi>0 = WASH-IN (flette su -> naso su,
+    # destabilizzante, come freccia in avanti). Attivo solo se il config lo espone.
+    _psi = float(getattr(config, "bend_twist_psi", 0.0) or 0.0)
+    if abs(_psi) > 1e-12:
+        if abs(_psi) >= 1.0:
+            raise ValueError(f"bend_twist_psi={_psi}: serve |psi|<1")
+        _kbt = _psi * np.sqrt(config.EIxx * config.GJ)
+        K[3, 4] = _kbt
+        K[4, 3] = _kbt
+        print(f"  bend-twist: psi={_psi:+.3f} -> K_bt={_kbt:.4g} "
+              f"({'WASH-IN' if _psi > 0 else 'WASH-OUT'})")
+
     xcm = config.xcm_factor * config.chord
     xea = config.xea_factor * config.chord
-    e = (xcm - xea)  # Offset in X direction: positive if CG is aft of EA
+    e = (xcm - xea)  # CG offset from shear center along local chord (+x = aft of SC)
+    on_sc = beam_on_shear_center(config)
+    axis_label = "shear center" if on_sc else "beam reference"
+    print(
+        f"  Beam nodes on {axis_label} (root at origin); "
+        f"xsc={xea:.6f} m from LE ({config.xea_factor:.3f}·c); "
+        f"xcm={xcm:.6f} m from LE ({config.xcm_factor:.3f}·c); "
+        f"CG offset e={e:.6f} m from SC in section M only"
+    )
 
-    # DOF ordering: [u, v, w, θx, θy, θz] where Y is the beam axis (spanwise)
     M = np.zeros((6, 6), float)
-    M[0, 0] = config.mu  # mass for u (chordwise X)
-    M[1, 1] = config.mu  # mass for v (axial Y, span)
-    M[2, 2] = config.mu  # mass for w (vertical Z)
-
-    # Off-diagonal coupling from -mu*skew(r), r = [e, 0, 0]
-    M[1, 5] = -config.mu * e   # F_v ↔ M_θz
-    M[5, 1] = -config.mu * e
-    M[2, 4] = +config.mu * e   # F_w ↔ M_θy  (KEY coupling for flutter: bending-torsion)
-    M[4, 2] = +config.mu * e
-
-    # Rotational inertias AT EA (CG values + Huygens-Steiner where needed)
-    M[3, 3] = config.i22                         # θx (chordwise bending) - no PAT
-    M[4, 4] = config.i11 + config.mu * e**2      # θy (torsion about span) + PAT
-    M[5, 5] = config.i33 + config.mu * e**2      # θz (vertical bending)  + PAT
+    _set_section_mass_at_reference(
+        M,
+        config.mu,
+        e,
+        i3=config.i22,
+        i4=config.i11,
+        i5=config.i33,
+        config=config,
+    )
 
     beam_model = create_beam_model(
-        K, M, config.beam_length, config.n_elements, config.pitch,
-        agard_theory=False, flutter_benchmark=True, sonata=False
+        K, M, config.beam_length, config.n_elements,
+        **beam_geometry_from_config(config),
+        cg_offset_e=e,
+        beam_on_shear_center=on_sc,
+        agard_theory=False,
+        flutter_benchmark=True,
+        sonata=False,
     )
-    
-    beam_model = rotate_beam_model_y(beam_model, [config.alpha_deg])
+
+    if bool(getattr(config, "structural_alpha_rotate", False)):
+        beam_model = rotate_beam_model_y(beam_model, [config.alpha_deg])
+    else:
+        print(f"  Structural mesh unrotated (α={config.alpha_deg}° applied in aero only, SHARPy convention)")
     
     # Add matrices to the model for later use
     beam_model['K_section'] = K
     beam_model['M_section'] = M
+    beam_model["geometry"]["beam_on_shear_center"] = on_sc
+    beam_model["geometry"]["xsc_factor"] = float(config.xea_factor)
+    beam_model["geometry"]["xcm_factor"] = float(config.xcm_factor)
     
     # Optionally save the section stiffness and mass matrices to CSV files.
     # Controlled by config.save_matrices (bool). If True, matrices are written
@@ -490,7 +876,7 @@ def _build_goland_model(config):
 
     if save_flag:
         matrices_dir = getattr(config, 'matrices_dir',
-                               os.path.join(config.output_dir, config.name))
+                               config.output_dir)
         os.makedirs(matrices_dir, exist_ok=True)
 
         model_name = config.name
@@ -509,10 +895,6 @@ def _build_goland_model(config):
 
 
 def _build_gridconv_model(config):
-    
-    from FEA.fea_utl.rotate_beams_y import rotate_beam_model_y
-    from FEA.fea_utl.beam_properties import create_beam_model
-    
     print(f"Building GOLAND structural model")
 
     # DOF ordering: [u, v, w, θx, θy, θz] where Y is the beam axis
@@ -528,39 +910,24 @@ def _build_gridconv_model(config):
     xea = config.xea_factor * config.chord
     e = (xcm - xea)  # Fixed: was (xea - xcm) which gave wrong sign!
 
-    # DOF ordering: [u, v, w, θx, θy, θz] where Y is the beam axis
     M = np.zeros((6, 6), float)
-    M[0, 0] = config.mu  # mass for u displacement
-    M[1, 1] = config.mu  # mass for v displacement (axial)
-    M[2, 2] = config.mu  # mass for w displacement
-
-    ## Coupling between w (transverse Z) and θy (torsion about Y-beam axis)
-    #M[2, 4] = config.mu * e
-    #M[4, 2] = config.mu * e
-    #
-    ## Rotational inertias
-    #M[3, 3] = config.i22  # Inertia about X
-    #M[4, 4] = config.i11  # Inertia about Y (torsion)
-    #M[5, 5] = config.i33  # Inertia about Z
-
-    # Off-diagonal coupling from -mu*skew(r), r = [e, 0, 0]
-    M[1, 5] = -config.mu * e   # F_v ↔ M_θz
-    M[5, 1] = -config.mu * e
-    M[2, 4] = +config.mu * e   # F_w ↔ M_θy  (KEY coupling for flutter: bending-torsion)
-    M[4, 2] = +config.mu * e
-
-    # Rotational inertias AT EA (CG values + Huygens-Steiner where needed)
-    # config.i22 = 0.1*i11 = inertia about X at CG → no PAT (offset // X)
-    # config.i11 = 8.64    = inertia about Y at CG → PAT: +mu*e²
-    # config.i33 = 0.9*i11 = inertia about Z at CG → PAT: +mu*e²
-    M[3, 3] = config.i22                         # θx (chordwise bending) - no PAT
-    M[4, 4] = config.i11 + config.mu * e**2      # θy (torsion about span) + PAT
-    M[5, 5] = config.i33 + config.mu * e**2 
- 
+    _set_section_mass_at_reference(
+        M,
+        config.mu,
+        e,
+        i3=config.i22,
+        i4=config.i11,
+        i5=config.i33,
+        config=config,
+    )
 
     beam_model = create_beam_model(
-        K, M, config.beam_length, config.n_elements, config.pitch,
-        agard_theory=False, flutter_benchmark=True, sonata=False, center_beam=True, chord=config.chord
+        K, M, config.beam_length, config.n_elements,
+        **beam_geometry_from_config(config),
+        cg_offset_e=e,
+        agard_theory=False,
+        flutter_benchmark=True,
+        sonata=False,
     )
     
     beam_model = rotate_beam_model_y(beam_model, [config.alpha_deg])
@@ -579,7 +946,7 @@ def _build_gridconv_model(config):
 
     if save_flag:
         matrices_dir = getattr(config, 'matrices_dir',
-                               os.path.join(config.output_dir, config.name))
+                               config.output_dir)
         os.makedirs(matrices_dir, exist_ok=True)
 
         model_name = config.name
@@ -618,16 +985,13 @@ def _build_sonata_model(config):
 
     K, M = transform_matrices(sections_props_csv, K, M)
 
-    # Check if the config specifies center_beam (default to False to keep original SONATA coords)
-    center_beam = getattr(config, 'center_beam', False)
-    chord = getattr(config, 'chord', None)
-    
+    geo = beam_geometry_from_config(config)
+
     beam_model = create_beam_model(
         K, M,
-        config.n_elements, 
+        config.n_elements,
         sections_props_csv=sections_props_csv,
-        center_beam=center_beam,
-        chord=chord
+        beam_axis_x_offset=geo["beam_axis_x_offset"],
     )
     
     beam_model = rotate_beam_model_y(beam_model, [config.alpha_deg])
@@ -642,7 +1006,7 @@ def _build_sonata_model(config):
 
     if save_flag:
         matrices_dir = getattr(config, 'matrices_dir',
-                               os.path.join(config.output_dir, config.name))
+                               config.output_dir)
         os.makedirs(matrices_dir, exist_ok=True)
 
         model_name = config.name
@@ -824,17 +1188,15 @@ def _build_tnz_multibody_model(config):
         e = e_el[i]  # Offset between CG and SC (zero for TNZ case)
         mu_i = mu_el[i]  # Use distributed mass at element i
         Mi = np.zeros((6, 6), float)
-        Mi[0, 0] = mu_i; 
-        Mi[1, 1] = mu_i; 
-        Mi[2, 2] = mu_i
-        Mi[2, 4] = +mu_i * e;  
-        Mi[4, 2] = +mu_i * e
-        Mi[1, 5] = -mu_i * e;  
-        Mi[5, 1] = -mu_i * e
-        Mi[3, 3] = i11_el[i]
-        Mi[4, 4] = i22_el[i] + mu_i * e**2
-        Mi[5, 5] = i33_el[i] + mu_i * e**2
-        
+        _set_section_mass_at_reference(
+            Mi,
+            mu_i,
+            e,
+            i3=i11_el[i],
+            i4=i22_el[i],
+            i5=i33_el[i],
+            config=config,
+        )
         M_dict_arm[f"e{i}"] = Mi
 
     # Build arm beam model with custom node positions following spline curve
@@ -910,24 +1272,12 @@ def _build_tnz_multibody_model(config):
         # Tangent unit vector in global frame for this element
         tangent = diff / L_e
 
-        # 6×6 rotation from local (+Y beam axis) to global (tangent direction)
-        T6 = T6_from_beam_direction(tangent)
-
         K_loc = K_dict_arm[f"e{i}"]
         M_loc = M_dict_arm[f"e{i}"]
 
-        # Rotate sectional matrices into the global frame
-        K_glob = T6 @ K_loc @ T6.T
-        M_glob = T6 @ M_loc @ T6.T
-
-        elements_arm.append({
-            "nodes":     [i, i + 1],
-            "stiffness": K_glob,
-            "mass":      M_glob,
-            "length":    L_e,
-            "T6":        T6,
-            "beam_dir_global": tangent.tolist(),
-        })
+        elem = {"nodes": [i, i + 1], "length": L_e}
+        orient_element_section_from_local(elem, p1, p2, K_loc, M_loc)
+        elements_arm.append(elem)
     
     sm_arm = {"nodes": nodes_arm, "elements": elements_arm}
     
@@ -1486,18 +1836,15 @@ def _build_tnz_multibody_model(config):
 
             M_link_loc = np.zeros((6, 6), float)   # massless link
 
-            K_link_glob = T6_link @ K_link_loc @ T6_link.T
-            M_link_glob = np.zeros((6, 6), float)
-
-            beam_model['elements'].append({
-                'nodes':           [anchor_idx, ghost_idx],
-                'stiffness':       K_link_glob,
-                'mass':            M_link_glob,
-                'length':          link_len,
-                'T6':              T6_link,
-                'beam_dir_global': link_dir.tolist(),
-                'rigid_link':      True,     # marker for diagnostics
-            })
+            link_elem = {
+                'nodes': [anchor_idx, ghost_idx],
+                'length': link_len,
+                'rigid_link': True,
+            }
+            orient_element_section_from_local(
+                link_elem, anchor_pos, cg_m, K_link_loc, M_link_loc
+            )
+            beam_model['elements'].append(link_elem)
             print(f"    Rigid link element appended: node {anchor_idx} → node {ghost_idx}  "
                   f"(L={link_len:.4f} m, dir={link_dir})")
 
@@ -1533,7 +1880,7 @@ def _build_tnz_multibody_model(config):
 
     if save_flag:
         matrices_dir = getattr(config, 'matrices_dir',
-                               os.path.join(config.output_dir, config.name))
+                               config.output_dir)
         os.makedirs(matrices_dir, exist_ok=True)
 
         model_name = config.name
@@ -1550,4 +1897,286 @@ def _build_tnz_multibody_model(config):
         except Exception as _e:
             print(f"Warning: could not save section matrices to {matrices_dir}: {_e}")
 
+    return beam_model
+
+
+def _build_tfoil_simple_model(config):
+    """T-foil semplificato (examples/TFOIL_SIMPLE): timone verticale + due semiali.
+
+    Geometria e sezioni da ``examples/TFOIL_SIMPLE/tfoil_simple_geom.py``. Frame di
+    GINO come AC38_TFOIL prima del diedro: x a poppa (verso della corrente), y lungo
+    il timone verso il basso (0 all'incastro, z = -90 mm), elevatore lungo z
+    (semiala 'elevator_stbd' a z < 0). Asse della trave sull'asse elastico di ogni
+    sezione; le semiali partono dalla PUNTA del timone (nodo condiviso, niente
+    collegamento rigido: nel caso semplificato non c'e' bulbo).
+    """
+    import importlib.util as _ilu
+    import numpy as _np
+    from FEA.fea_utl.multibody_assembly import (assemble_multibody,
+                                                orient_element_section_from_local)
+
+    _p = _os_path_join(config.paths['FSI'], 'examples', 'TFOIL_SIMPLE', 'tfoil_simple_geom.py')
+    _s = _ilu.spec_from_file_location('tfoil_simple_geom', _p)
+    G = _ilu.module_from_spec(_s); _s.loader.exec_module(G)
+    print(f"Building TFOIL_SIMPLE structural model: {G.tag()}")
+
+    ne_r = int(getattr(config, 'n_elements', 52))
+    ne_e = int(getattr(config, 'n_elements_elevator', 18))
+    chord_dir = _np.array([1.0, 0.0, 0.0])
+
+    def _branch(pos, chords, name):
+        nodes = [{"position": p.tolist(), "index": i, "submodel": name} for i, p in enumerate(pos)]
+        elements = []
+        for i in range(len(pos) - 1):
+            K, M = G.section(0.5 * (chords[i] + chords[i + 1]))
+            el = {"nodes": [i, i + 1], "length": float(_np.linalg.norm(pos[i + 1] - pos[i]))}
+            orient_element_section_from_local(el, pos[i], pos[i + 1], K, M,
+                                              chord_direction_global=chord_dir)
+            elements.append(el)
+        return {"nodes": nodes, "elements": elements}
+
+    yr = _np.linspace(0.0, G.L_RUDDER, ne_r + 1)
+    pos_r = _np.column_stack([_np.zeros_like(yr), yr, _np.zeros_like(yr)])
+    sm_r = _branch(pos_r, G.chord_rudder(-(G.Z_ROOT - yr)), "rudder")
+    sm_r["nodes"][0]["clamped"] = True
+    s = _np.linspace(0.0, G.ELEV_SEMISPAN, ne_e + 1)
+    subs = [sm_r]
+    edx = float(getattr(G, "EDX", 0.0))
+    for sign, name in ((-1.0, "elevator_stbd"), (+1.0, "elevator_port")):
+        pos = _np.column_stack([_np.full_like(s, edx), _np.full_like(s, G.L_RUDDER), sign * s])
+        subs.append(_branch(pos, G.chord_elev(s), name))
+    if edx:
+        # collegamento RIGIDO punta del timone -> radice dell'elevatore (come AC38_TFOIL):
+        # rigidezza isotropa 100 volte la piu' alta della radice, massa nulla
+        K0r, _ = G.section(G.C_ROOT)
+        tip = _np.array([0.0, G.L_RUDDER, 0.0]); root = _np.array([edx, G.L_RUDDER, 0.0])
+        subs.append({"nodes": [{"position": tip.tolist(), "index": 0, "submodel": "link"},
+                               {"position": root.tolist(), "index": 1, "submodel": "link"}],
+                     "elements": [{"nodes": [0, 1], "length": abs(edx),
+                                   "stiffness": 1e2 * float(_np.max(_np.diag(K0r))) * _np.eye(6),
+                                   "mass": _np.zeros((6, 6))}]})
+        print(f"  Elevatore spostato di {edx*1e3:+.1f} mm lungo x (collegamento rigido senza massa)")
+    beam_model = assemble_multibody(subs, tol=1e-7)
+    beam_model["is_multibody"] = True
+    beam_model["sub_beam_names"] = ["rudder", "elevator_stbd", "elevator_port"] + (["link"] if edx else [])
+    K0, M0 = G.section(G.C_ROOT)
+    beam_model["K_section"] = K0
+    beam_model["M_section"] = M0
+    m_tot = sum(el["section_mass_local"][0, 0] * el["length"] for el in beam_model["elements"] if "section_mass_local" in el)
+    print(f"  {len(beam_model['nodes'])} nodi, {len(beam_model['elements'])} elementi, massa {m_tot:.1f} kg")
+    print("  " + G.summary().replace("\n", "\n  "))
+    return beam_model
+
+
+def _build_ac37_tfoil_model(config):
+    """Timone AC37 (RE143 / RE202, examples/AC37_TFOIL): trave verticale + due semiali.
+
+    Tabelle di trave ASWING (EI, GK, massa, centro di taglio) da
+    ``examples/AC37_TFOIL/ac37_geom.py``. Frame come TFOIL_SIMPLE: x a poppa, y lungo il
+    timone verso il basso (0 alla boccola inferiore), elevatore lungo z. Le travi seguono
+    la linea dei centri di taglio; elevatore collegato alla punta del timone da un
+    elemento rigido senza massa quando i due assi non coincidono.
+    """
+    import importlib.util as _ilu
+    import numpy as _np
+    from FEA.fea_utl.multibody_assembly import (assemble_multibody,
+                                                orient_element_section_from_local)
+
+    _p = _os_path_join(config.paths['FSI'], 'examples', 'AC37_TFOIL', 'ac37_geom.py')
+    _s = _ilu.spec_from_file_location('ac37_geom', _p)
+    G = _ilu.module_from_spec(_s); _s.loader.exec_module(G)
+    print(f"Building AC37_TFOIL structural model: {G.tag()}")
+
+    ne_r = int(getattr(config, 'n_elements', 56))
+    ne_e = int(getattr(config, 'n_elements_elevator', 18))
+    chord_dir = _np.array([1.0, 0.0, 0.0])
+    L_r, L_e = G.Y_END - G.Y_TOP, G.ELEV_SEMISPAN
+
+    def _branch(pos, props, L, name):
+        nodes = [{"position": p.tolist(), "index": i, "submodel": name} for i, p in enumerate(pos)]
+        elements = []
+        for i in range(len(pos) - 1):
+            K, M = G.section(props(i), L)
+            el = {"nodes": [i, i + 1], "length": float(_np.linalg.norm(pos[i + 1] - pos[i]))}
+            orient_element_section_from_local(el, pos[i], pos[i + 1], K, M,
+                                              chord_direction_global=chord_dir)
+            elements.append(el)
+        return {"nodes": nodes, "elements": elements}
+
+    pos_r = G.rudder_nodes(ne_r)
+    sm_r = _branch(pos_r, lambda i: G.rudder_props(0.5 * (pos_r[i, 1] + pos_r[i + 1, 1]), (pos_r[i, 1], pos_r[i + 1, 1])),
+                   L_r, "rudder")
+    sm_r["nodes"][0]["clamped"] = G.SUPPORT == "clamp"
+    subs = [sm_r]
+    for sign, name in ((-1.0, "elevator_stbd"), (+1.0, "elevator_port")):
+        pos, Y = G.elev_nodes(ne_e, sign)
+        subs.append(_branch(pos, lambda i, Y=Y: G.elev_props(0.5 * (Y[i] + Y[i + 1]), (Y[i], Y[i + 1])), L_e, name))
+    if G.LINK:
+        # collegamento RIGIDO punta del timone -> radice dell'elevatore (come AC38_TFOIL)
+        K0r, _ = G.section(G.rudder_props(0.5), L_r)
+        tip = pos_r[-1]; root = G.elev_nodes(ne_e, 1.0)[0][0]
+        subs.append({"nodes": [{"position": tip.tolist(), "index": 0, "submodel": "link"},
+                               {"position": root.tolist(), "index": 1, "submodel": "link"}],
+                     "elements": [{"nodes": [0, 1], "length": float(_np.linalg.norm(root - tip)),
+                                   "stiffness": 1e2 * float(_np.max(_np.diag(K0r))) * _np.eye(6),
+                                   "mass": _np.zeros((6, 6))}]})
+        print(f"  Collegamento rigido timone -> elevatore: dx = {(root[0]-tip[0])*1e3:+.1f} mm")
+    beam_model = assemble_multibody(subs, tol=1e-7)
+    beam_model["is_multibody"] = True
+    beam_model["sub_beam_names"] = ["rudder", "elevator_stbd", "elevator_port"] + (["link"] if G.LINK else [])
+    K0, M0 = G.section(G.rudder_props(1.0), L_r)
+    beam_model["K_section"] = K0
+    beam_model["M_section"] = M0
+    m_tot = sum(el["section_mass_local"][0, 0] * el["length"] for el in beam_model["elements"] if "section_mass_local" in el)
+    print(f"  {len(beam_model['nodes'])} nodi, {len(beam_model['elements'])} elementi, massa {m_tot:.2f} kg")
+    print("  " + G.summary().replace("\n", "\n  "))
+    return beam_model
+
+
+def _os_path_join(*a):
+    import os as _os
+    return _os.path.join(*a)
+
+
+def _build_ac38_tfoil_model(config):
+    """Timone AC38 a T: trave verticale + le due semiali dell'elevatore.
+
+    TRE SOTTOMODELLI e un collegamento.
+
+      1. il TIMONE, dalla stessa csv_export del caso a sola verticale: nodi
+         lungo +Y (nel frame prima del diedro), sull'asse di rotazione.
+      2/3. le due SEMIALI dell'elevatore, da ``out/beam_ELEV/elevator_beam.npz``,
+         gia' nel frame globale. La semiala sinistra e' lo specchio z -> -z di
+         quella destra, con i momenti che prendono il segno in piu' dovuto allo
+         specchio (vedi beam/export_elevator_beam.py).
+      4. un elemento RIGIDO che collega la punta della lama alla radice
+         dell'elevatore.
+
+    PERCHE' UN ELEMENTO E NON UNA SALDATURA DI NODI. I due punti non coincidono:
+    la punta della lama sta sull'asse di rotazione, la radice dell'elevatore
+    102.7 mm a poppa e 38.5 mm piu' in basso. Quell'offset e' un braccio, e un
+    braccio trasmette momento: ignorarlo e saldare i nodi toglierebbe
+    l'accoppiamento fra la flessione dell'elevatore e la TORSIONE del timone,
+    che e' il meccanismo da cui dipende il flutter di un timone a T.
+
+    Il collegamento e' rigido perche' cosi' lo prescrive RevD (nota 13), ed e'
+    fisicamente il bulbo d'acciaio che fascia la punta della lama con 27 viti.
+    Si realizza con un elemento mille volte piu' rigido del membro piu' rigido
+    che collega e con massa NULLA: la massa del bulbo c'e' gia' nelle sezioni
+    dell'elevatore vicino a y = 0, e contarla di nuovo la raddoppierebbe.
+    """
+    import os as _os
+    import numpy as _np
+    from FEA.fea_utl.multibody_assembly import assemble_multibody, T6_from_beam_and_chord
+
+    print(f"Building AC38 T-foil structural model: {config.name}")
+
+    # ── 1. verticale ─────────────────────────────────────────────────────────
+    beam_rudder = _build_sonata_model(config)
+    sm_rudder = {
+        "nodes": [{**n, "submodel": "rudder"} for n in beam_rudder["nodes"]],
+        "elements": beam_rudder["elements"],
+    }
+    tip = _np.asarray(sm_rudder["nodes"][-1]["position"], float)
+    print(f"  Timone: {len(sm_rudder['nodes'])} nodi, punta della lama {tip}")
+
+    # ── 2/3. elevatore ───────────────────────────────────────────────────────
+    npz = getattr(config, "elevator_beam_npz", None)
+    if not npz:
+        raise ValueError("config.elevator_beam_npz non impostato: serve la tabella "
+                         "prodotta da beam/export_elevator_beam.py")
+    d = _np.load(npz)
+    y = _np.asarray(d["y_mm"], float).copy()
+    P = _np.asarray(d["pos"], float).copy()
+    Kg = _np.asarray(d["K"], float)
+    Mg = _np.asarray(d["M"], float)
+    MIR6 = _np.asarray(d["mir6"], float)
+    S = _np.diag([1.0, 1.0, -1.0])
+
+    # la prima stazione sta a y = 0.5 mm: la si porta esattamente a y = 0 cosi'
+    # le radici delle due semiali coincidono e il multibody le salda fra loro
+    P[0, 2] = 0.0
+    # AC38_ELEV_DX [mm]: sensitivita' allo stagger, elevatore traslato verso prua
+    # (x negativo nella terna di GINO) di questa quantita'
+    _dx = float(_os.environ.get("AC38_ELEV_DX", "0") or 0.0)
+    if _dx:
+        P[:, 0] -= _dx * 1e-3
+        print(f"  Elevatore traslato di {_dx:.1f} mm verso prua (AC38_ELEV_DX)")
+    # AC38_ELEV_SHIFT=<csv y_mm,dx_mm>: ogni sezione traslata rigidamente verso prua di dx(y) (asse elastico
+    # dritto, 30_asse_elastico_dritto). K e M sono riferite al centro di tensione, che trasla con la sezione:
+    # cambia solo la posizione dei nodi
+    _sh = _os.environ.get("AC38_ELEV_SHIFT")
+    if _sh:
+        _t = _np.loadtxt(_sh, delimiter=",", comments="#", ndmin=2)
+        P[:, 0] -= _np.interp(y, _t[:, 0], _t[:, 1]) * 1e-3
+        print(f"  Sezioni dell'elevatore traslate da {_sh} (dx {_t[:, 1].min():.1f}..{_t[:, 1].max():.1f} mm)")
+    n_el_half = int(getattr(config, "n_elements_elevator", len(y) - 1))
+    if n_el_half != len(y) - 1:
+        # ricampionamento uniforme sullo span, se richiesto
+        ys = _np.linspace(y[0], y[-1], n_el_half + 1)
+        P = _np.column_stack([_np.interp(ys, y, P[:, k]) for k in range(3)])
+        Kg = _np.array([[[_np.interp(t, y, Kg[:, i, j]) for j in range(6)]
+                         for i in range(6)] for t in ys])
+        Mg = _np.array([[[_np.interp(t, y, Mg[:, i, j]) for j in range(6)]
+                         for i in range(6)] for t in ys])
+        y = ys
+        P[0, 2] = 0.0
+
+    def _half(side, name):
+        """side=+1 dritta (z_G negativo), side=-1 sinistra."""
+        pos = P.copy()
+        K_, M_ = Kg, Mg
+        if side < 0:
+            pos[:, 2] = -pos[:, 2]
+            K_ = _np.einsum('ij,njk,lk->nil', MIR6, Kg, MIR6)
+            M_ = _np.einsum('ij,njk,lk->nil', MIR6, Mg, MIR6)
+        nodes, elements = [], []
+        for i, p in enumerate(pos):
+            nodes.append({"position": p.tolist(), "index": i, "submodel": name})
+        for i in range(len(pos) - 1):
+            d_ = pos[i + 1] - pos[i]
+            L = float(_np.linalg.norm(d_))
+            # La terna dell'elemento va FISSATA alla corda. Senza, GINO la
+            # deduce dalla sola direzione dell'elemento e sceglie una
+            # perpendicolare qualunque: su un'ala a freccia quella scelta ruota
+            # la sezione nel suo piano e scambia EI_flap con EI_chord, che qui
+            # differiscono di un fattore 40.
+            elements.append({
+                "nodes": [i, i + 1], "length": L,
+                "stiffness": 0.5 * (K_[i] + K_[i + 1]),
+                "mass": 0.5 * (M_[i] + M_[i + 1]),
+                "T6": T6_from_beam_and_chord(d_ / L, _np.array([1.0, 0.0, 0.0])),
+            })
+        return {"nodes": nodes, "elements": elements}
+
+    sm_stbd = _half(+1, "elevator_stbd")
+    sm_port = _half(-1, "elevator_port")
+    root = _np.asarray(sm_stbd["nodes"][0]["position"], float)
+    print(f"  Elevatore: 2 x {len(y)} nodi, radice {root}, "
+          f"semiapertura {abs(P[-1, 2]):.4f} m")
+
+    # ── 4. collegamento rigido ───────────────────────────────────────────────
+    off = root - tip
+    # Rigidezza ISOTROPA, non la diagonale della radice scalata: un elemento
+    # rigido non deve avere direzioni preferite, e con una diagonale anisotropa
+    # il risultato dipenderebbe da come l'elemento e' orientato nello spazio.
+    k_scale = float(getattr(config, "tfoil_link_stiffness_factor", 1.0e2))
+    K_link = k_scale * float(_np.max(_np.diag(Kg[0]))) * _np.eye(6)
+    sm_link = {
+        "nodes": [{"position": tip.tolist(), "index": 0, "submodel": "link"},
+                  {"position": root.tolist(), "index": 1, "submodel": "link"}],
+        "elements": [{"nodes": [0, 1], "length": float(_np.linalg.norm(off)),
+                      "stiffness": K_link, "mass": _np.zeros((6, 6))}],
+    }
+    print(f"  Collegamento rigido: offset ({off[0]*1e3:+.1f}, {off[1]*1e3:+.1f}, "
+          f"{off[2]*1e3:+.1f}) mm, lunghezza {_np.linalg.norm(off)*1e3:.1f} mm, "
+          f"rigidezza isotropa {k_scale:g}x la piu' alta della radice, massa nulla")
+
+    beam_model = assemble_multibody([sm_rudder, sm_link, sm_stbd, sm_port], tol=1e-7)
+    beam_model["is_multibody"] = True
+    beam_model["sub_beam_names"] = ["rudder", "link", "elevator_stbd", "elevator_port"]
+    beam_model["K_section"] = beam_rudder.get("K_section")
+    beam_model["M_section"] = beam_rudder.get("M_section")
+    print(f"  Assemblato: {len(beam_model['nodes'])} nodi, "
+          f"{len(beam_model['elements'])} elementi")
     return beam_model

@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2022/dev/Debian) (preloaded format=pdflatex 2026.1.30)  20 MAY 2026 15:07
+This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2022/dev/Debian) (preloaded format=pdflatex 2026.1.30)  23 JUN 2026 10:16
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -814,26 +814,26 @@ Package siunitx Info: Option "detect-all" has been deprecated in this release.
 t.aux)
 \openout1 = `abramson1965_current_report.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 49.
-LaTeX Font Info:    ... okay on input line 49.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 49.
-LaTeX Font Info:    ... okay on input line 49.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 49.
-LaTeX Font Info:    ... okay on input line 49.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 49.
-LaTeX Font Info:    ... okay on input line 49.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 49.
-LaTeX Font Info:    ... okay on input line 49.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 49.
-LaTeX Font Info:    ... okay on input line 49.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 49.
-LaTeX Font Info:    ... okay on input line 49.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 49.
-LaTeX Font Info:    ... okay on input line 49.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 49.
-LaTeX Font Info:    ... okay on input line 49.
-LaTeX Info: Redefining \it@ocap on input line 49.
-LaTeX Info: Redefining \it@ccap on input line 49.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Info: Redefining \it@ocap on input line 48.
+LaTeX Info: Redefining \it@ccap on input line 48.
 
 *geometry* driver: auto-detecting
 *geometry* detected driver: pdftex
@@ -896,8 +896,8 @@ Package caption Info: float package is loaded.
 Package caption Info: hyperref package is loaded.
 Package caption Info: End \AtBeginDocument code.
 Package translations Info: no dictionary file `translations-basic-dictionary-it
-alian.trsl' found. on input line 49.
-Package hyperref Info: Link coloring OFF on input line 49.
+alian.trsl' found. on input line 48.
+Package hyperref Info: Link coloring OFF on input line 48.
 
 (/usr/share/texlive/texmf-dist/tex/latex/hyperref/nameref.sty
 Package: nameref 2021-04-02 v2.47 Cross-referencing by name of section
@@ -910,9 +910,9 @@ Package: gettitlestring 2019/12/15 v1.6 Cleanup title references (HO)
 )
 \c@section@level=\count343
 )
-LaTeX Info: Redefining \ref on input line 49.
-LaTeX Info: Redefining \pageref on input line 49.
-LaTeX Info: Redefining \nameref on input line 49.
+LaTeX Info: Redefining \ref on input line 48.
+LaTeX Info: Redefining \pageref on input line 48.
+LaTeX Info: Redefining \nameref on input line 48.
 
 (docs/resources/benchmarks/abramson1965_report/build/abramson1965_current_repor
 t.out)
@@ -925,204 +925,425 @@ t.out)
 Package pgfplots notification 'compat/show suggested version=true': document ha
 s been generated with the most recent feature set (\pgfplotsset{compat=1.18}).
 
-LaTeX Font Info:    Trying to load font information for U+msa on input line 51.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 50.
 
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 51.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 50.
 
 
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 )
-<docs/resources/benchmarks/notes/figure_5_abramson.png, id=39, 940.51375pt x 65
+LaTeX Font Info:    Trying to load font information for T1+cmtt on input line 6
+3.
+
+(/usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd
+File: t1cmtt.fd 2019/12/16 v2.5j Standard LaTeX font definitions
+)
+Overfull \hbox (2.54898pt too wide) in paragraph at lines 52--67
+[]\T1/cmr/m/n/10 Questo re-port do-cu-men-ta la si-mu-la-zio-ne nu-me-ri-ca del
+ mo-del-lo di idro-foil ABRAM-SON1965,
+ []
+
+<docs/resources/benchmarks/notes/figure_5_abramson.png, id=91, 940.51375pt x 65
 4.445pt>
 File: docs/resources/benchmarks/notes/figure_5_abramson.png Graphic file (type 
 png)
 <use docs/resources/benchmarks/notes/figure_5_abramson.png>
 Package pdftex.def Info: docs/resources/benchmarks/notes/figure_5_abramson.png 
- used on input line 80.
+ used on input line 88.
 (pdftex.def)             Requested size: 225.8605pt x 157.15988pt.
-<docs/resources/benchmarks/notes/figure_6_abramson.png, id=41, 784.9325pt x 893
+<docs/resources/benchmarks/notes/figure_6_abramson.png, id=93, 784.9325pt x 893
 .3375pt>
 File: docs/resources/benchmarks/notes/figure_6_abramson.png Graphic file (type 
 png)
 <use docs/resources/benchmarks/notes/figure_6_abramson.png>
 Package pdftex.def Info: docs/resources/benchmarks/notes/figure_6_abramson.png 
- used on input line 86.
+ used on input line 94.
 (pdftex.def)             Requested size: 179.76424pt x 204.5909pt.
-LaTeX Font Info:    Trying to load font information for T1+cmtt on input line 9
-4.
+[1
 
-(/usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd
-File: t1cmtt.fd 2019/12/16 v2.5j Standard LaTeX font definitions
-) [1
+{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}]
 
-{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map} <./docs/resources/benchmark
-s/notes/figure_5_abramson.png> <./docs/resources/benchmarks/notes/figure_6_abra
-mson.png>]
-Overfull \hbox (56.28468pt too wide) in paragraph at lines 101--120
- [][] 
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 135.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `\zeta' on input line 135.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 135.
+
+
+Overfull \hbox (8.21149pt too wide) in paragraph at lines 138--144
+\T1/cmr/m/n/10.95 cien-ti $\OML/cmm/m/it/10.95 $\T1/cmr/m/n/10.95 , $\OML/cmm/
+m/it/10.95 ^^L$ \T1/cmr/m/n/10.95 ri-ca-va-ti da \T1/cmtt/m/n/10.95 rayleigh_ta
+rget_zetas \T1/cmr/m/n/10.95 sui mo-di sec-chi usa-ti nel flut-ter (\T1/cmtt/m/
+n/10.95 rayleigh_mode_ids
  []
 
-<output_data/vg_lambda_vf_combined.png, id=63, 1292.1876pt x 353.6412pt>
-File: output_data/vg_lambda_vf_combined.png Graphic file (type png)
-<use output_data/vg_lambda_vf_combined.png>
-Package pdftex.def Info: output_data/vg_lambda_vf_combined.png  used on input l
-ine 155.
-(pdftex.def)             Requested size: 460.93466pt x 126.14516pt.
-[2]
-<output_data/stiffness_damping_contributions.png, id=77, 1604.394pt x 353.6412p
-t>
-File: output_data/stiffness_damping_contributions.png Graphic file (type png)
-<use output_data/stiffness_damping_contributions.png>
-Package pdftex.def Info: output_data/stiffness_damping_contributions.png  used 
-on input line 162.
+[2 <./docs/resources/benchmarks/notes/figure_5_abramson.png> <./docs/resources/
+benchmarks/notes/figure_6_abramson.png>]
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 159.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `\delta' on input line 159.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 159.
+
+[3]
+
+LaTeX Warning: File `output_data/ABRAMSON1965/ABRAMSON_PK-STRIP_vgvf_combined.p
+ng' not found on input line 219.
+
+
+! Package pdftex.def Error: File `output_data/ABRAMSON1965/ABRAMSON_PK-STRIP_vg
+vf_combined.png' not found: using draft setting.
+
+See the pdftex.def package documentation for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.219 ...965/ABRAMSON_PK-STRIP_vgvf_combined.png}}
+                                                  
+Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+
+LaTeX Warning: File `output_data/ABRAMSON1965/ABRAMSON_RFA-STRIP_vgvf_combined.
+png' not found on input line 227.
+
+
+! Package pdftex.def Error: File `output_data/ABRAMSON1965/ABRAMSON_RFA-STRIP_v
+gvf_combined.png' not found: using draft setting.
+
+See the pdftex.def package documentation for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.227 ...65/ABRAMSON_RFA-STRIP_vgvf_combined.png}}
+                                                  
+Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+[4] [5]
+<output_data/ABRAMSON1965/stiffness_damping_contributions.png, id=161, 1604.394
+pt x 353.6412pt>
+File: output_data/ABRAMSON1965/stiffness_damping_contributions.png Graphic file
+ (type png)
+<use output_data/ABRAMSON1965/stiffness_damping_contributions.png>
+Package pdftex.def Info: output_data/ABRAMSON1965/stiffness_damping_contributio
+ns.png  used on input line 267.
 (pdftex.def)             Requested size: 460.93466pt x 101.59819pt.
-<output_data/ABRAMSON1965/ABRAMSON1965_DLM_participants.png, id=78, 1003.5894pt
- x 353.6412pt>
+<output_data/ABRAMSON1965/ABRAMSON1965_DLM_participants.png, id=162, 1003.5894p
+t x 353.6412pt>
 File: output_data/ABRAMSON1965/ABRAMSON1965_DLM_participants.png Graphic file (
 type png)
 <use output_data/ABRAMSON1965/ABRAMSON1965_DLM_participants.png>
 Package pdftex.def Info: output_data/ABRAMSON1965/ABRAMSON1965_DLM_participants
-.png  used on input line 171.
+.png  used on input line 276.
 (pdftex.def)             Requested size: 437.88652pt x 154.30212pt.
 <output_data/ABRAMSON1965/ABRAMSON1965_Madded_terms_vs_V_capytaine_vs_strip.png
-, id=79, 715.0715pt x 512.314pt>
+, id=163, 715.0715pt x 512.314pt>
 File: output_data/ABRAMSON1965/ABRAMSON1965_Madded_terms_vs_V_capytaine_vs_stri
 p.png Graphic file (type png)
 <use output_data/ABRAMSON1965/ABRAMSON1965_Madded_terms_vs_V_capytaine_vs_strip
 .png>
 Package pdftex.def Info: output_data/ABRAMSON1965/ABRAMSON1965_Madded_terms_vs_
-V_capytaine_vs_strip.png  used on input line 178.
+V_capytaine_vs_strip.png  used on input line 283.
 (pdftex.def)             Requested size: 391.79727pt x 280.7026pt.
- [3 <./output_data/vg_lambda_vf_combined.png> <./output_data/stiffness_damping_
-contributions.png> <./output_data/ABRAMSON1965/ABRAMSON1965_DLM_participants.pn
-g>]
-Overfull \hbox (49.0133pt too wide) in paragraph at lines 202--211
-\T1/cmr/m/n/10.95 Questi va-lo-ri so-no ri-por-ta-ti nel fi-le \T1/cmtt/m/n/10.
-95 stiffness_damping_contributions.csv \T1/cmr/m/n/10.95 (co-lon-ne \T1/cmtt/m/
-n/10.95 M_structural_00/11\T1/cmr/m/n/10.95 )
+ [6 <./output_data/ABRAMSON1965/stiffness_damping_contributions.png> <./output_
+data/ABRAMSON1965/ABRAMSON1965_DLM_participants.png>]
+Overfull \hbox (13.7052pt too wide) in paragraph at lines 297--302
+ []\T1/cmr/bx/n/10.95 Massa strut-tu-ra-le mo-da-le ge-ne-ra-liz-za-ta ($[]$).[
+] \T1/cmr/m/n/10.95 La ri-du-zio-ne mo-da-le pro-du-ce $[] \OT1/cmr/m/n/10.95 =
+ ^^H[]\OML/cmm/m/it/10.95 M[] \OT1/cmr/m/n/10.95 ^^H$\T1/cmr/m/n/10.95 ,
  []
 
-[4 <./output_data/ABRAMSON1965/ABRAMSON1965_Madded_terms_vs_V_capytaine_vs_stri
+
+Overfull \hbox (3.45085pt too wide) in paragraph at lines 297--302
+\T1/cmr/m/n/10.95 con $\OT1/cmr/m/n/10.95 ^^H$ \T1/cmr/m/n/10.95 co-sti-tui-to 
+da-gli au-to-vet-to-ri sec-chi nor-ma-liz-za-ti ri-spet-to al-la mas-sa strut-t
+u-ra-le ($\OML/cmm/m/it/10.95 ^^^[]M[] ^^^[] \OT1/cmr/m/n/10.95 =
+ []
+
+
+LaTeX Warning: File `FLUID/capytaine/ABRAMSON1965/results_modal_radiation/added
+_mass_vs_omega_all_depths.png' not found on input line 323.
+
+
+! Package pdftex.def Error: File `FLUID/capytaine/ABRAMSON1965/results_modal_ra
+diation/added_mass_vs_omega_all_depths.png' not found: using draft setting.
+
+See the pdftex.def package documentation for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.323 ...tion/added_mass_vs_omega_all_depths.png}}
+                                                  
+Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+[7 <./output_data/ABRAMSON1965/ABRAMSON1965_Madded_terms_vs_V_capytaine_vs_stri
 p.png>]
-Overfull \hbox (11.42078pt too wide) in paragraph at lines 228--229
- []\T1/cmr/bx/n/10.95 Massa ag-giun-ta mo-da-le ge-ne-ra-liz-za-ta (quel-la nel
- plot e in $\OML/cmm/m/it/10.95 M[]$\T1/cmr/bx/n/10.95 ).[] \T1/cmr/m/n/10.95 N
-el sol-ver idro-aeroelastico
+
+LaTeX Warning: File `FLUID/capytaine/ABRAMSON1965/results_modal_radiation/radia
+tion_damping_vs_omega_all_depths.png' not found on input line 332.
+
+
+! Package pdftex.def Error: File `FLUID/capytaine/ABRAMSON1965/results_modal_ra
+diation/radiation_damping_vs_omega_all_depths.png' not found: using draft setti
+ng.
+
+See the pdftex.def package documentation for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.332 ...diation_damping_vs_omega_all_depths.png}}
+                                                  
+Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+[8]
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 360.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 360.
+
+[9] [10]
+Underfull \hbox (badness 2941) in paragraph at lines 491--492
+[]|\T1/cmr/m/n/10.95 Forza ge-ne-ra-liz-za-ta; $\OML/cmm/m/it/10.95 k\OT1/cmr/m
+/n/10.95 (\OML/cmm/m/it/10.95 V\OT1/cmr/m/n/10.95 ) =
  []
 
-<FLUID/capytaine/ABRAMSON1965/results_modal_radiation/added_mass_vs_omega_all_d
-epths.png, id=101, 570.13pt x 455.7025pt>
-File: FLUID/capytaine/ABRAMSON1965/results_modal_radiation/added_mass_vs_omega_
-all_depths.png Graphic file (type png)
-<use FLUID/capytaine/ABRAMSON1965/results_modal_radiation/added_mass_vs_omega_a
-ll_depths.png>
-Package pdftex.def Info: FLUID/capytaine/ABRAMSON1965/results_modal_radiation/a
-dded_mass_vs_omega_all_depths.png  used on input line 261.
-(pdftex.def)             Requested size: 424.05904pt x 338.94597pt.
-[5]
-<FLUID/capytaine/ABRAMSON1965/results_modal_radiation/radiation_damping_vs_omeg
-a_all_depths.png, id=107, 570.13pt x 455.7025pt>
-File: FLUID/capytaine/ABRAMSON1965/results_modal_radiation/radiation_damping_vs
-_omega_all_depths.png Graphic file (type png)
-<use FLUID/capytaine/ABRAMSON1965/results_modal_radiation/radiation_damping_vs_
-omega_all_depths.png>
-Package pdftex.def Info: FLUID/capytaine/ABRAMSON1965/results_modal_radiation/r
-adiation_damping_vs_omega_all_depths.png  used on input line 273.
-(pdftex.def)             Requested size: 424.05904pt x 338.94597pt.
- [6 <./FLUID/capytaine/ABRAMSON1965/results_modal_radiation/added_mass_vs_omega
-_all_depths.png>]
-<output_data/ABRAMSON1965/ABRAMSON_PK_vgvf_combined.png, id=115, 1291.7058pt x 
-353.6412pt>
-File: output_data/ABRAMSON1965/ABRAMSON_PK_vgvf_combined.png Graphic file (type
- png)
-<use output_data/ABRAMSON1965/ABRAMSON_PK_vgvf_combined.png>
-Package pdftex.def Info: output_data/ABRAMSON1965/ABRAMSON_PK_vgvf_combined.png
-  used on input line 314.
-(pdftex.def)             Requested size: 460.93466pt x 126.19373pt.
- [7 <./FLUID/capytaine/ABRAMSON1965/results_modal_radiation/radiation_damping_v
-s_omega_all_depths.png>]
-<output_data/ABRAMSON1965/ABRAMSON_PK-STRIP_vgvf_combined.png, id=124, 1292.187
-6pt x 353.6412pt>
-File: output_data/ABRAMSON1965/ABRAMSON_PK-STRIP_vgvf_combined.png Graphic file
- (type png)
-<use output_data/ABRAMSON1965/ABRAMSON_PK-STRIP_vgvf_combined.png>
-Package pdftex.def Info: output_data/ABRAMSON1965/ABRAMSON_PK-STRIP_vgvf_combin
-ed.png  used on input line 323.
-(pdftex.def)             Requested size: 460.93466pt x 126.14516pt.
-<output_data/ABRAMSON1965/ABRAMSON_RFA-STRIP_vgvf_combined.png, id=125, 1292.18
-76pt x 353.6412pt>
-File: output_data/ABRAMSON1965/ABRAMSON_RFA-STRIP_vgvf_combined.png Graphic fil
-e (type png)
-<use output_data/ABRAMSON1965/ABRAMSON_RFA-STRIP_vgvf_combined.png>
-Package pdftex.def Info: output_data/ABRAMSON1965/ABRAMSON_RFA-STRIP_vgvf_combi
-ned.png  used on input line 332.
-(pdftex.def)             Requested size: 460.93466pt x 126.14516pt.
 
-Overfull \hbox (55.60126pt too wide) in paragraph at lines 347--354
-\T1/cmr/m/n/10.95 so-no: \T1/cmtt/m/n/10.95 abramson_fig5_digitized.csv\T1/cmr/
-m/n/10.95 , \T1/cmtt/m/n/10.95 abramson_fig6_digitized.csv \T1/cmr/m/n/10.95 e 
-\T1/cmtt/m/n/10.95 abramson_current_selected.csv\T1/cmr/m/n/10.95 .
+Underfull \hbox (badness 10000) in paragraph at lines 492--492
+[]|\T1/cmr/m/n/10.95 Misurata
  []
 
-[8 <./output_data/ABRAMSON1965/ABRAMSON_PK_vgvf_combined.png> <./output_data/AB
-RAMSON1965/ABRAMSON_PK-STRIP_vgvf_combined.png> <./output_data/ABRAMSON1965/ABR
-AMSON_RFA-STRIP_vgvf_combined.png>]
+
+Underfull \hbox (badness 10000) in paragraph at lines 493--493
+[]|$[][] []\OT1/cmr/m/n/10.95 (\OML/cmm/m/it/10.95 L[]\OT1/cmr/m/n/10.95 (\OML/
+cmm/m/it/10.95 U\OT1/cmr/m/n/10.95 ))$\T1/cmr/m/n/10.95 ,
+ []
+
+[11]
+Underfull \hbox (badness 7631) in paragraph at lines 550--550
+[]|\T1/cmr/m/n/10.95 Galleria, mo-del-lo ca-ri-chi;
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 552--552
+[]|\T1/cmr/m/n/10.95 Reale (at-tu-ta-men-to stru-
+ []
+
+
+Underfull \hbox (badness 1460) in paragraph at lines 553--554
+[]|$\OML/cmm/m/it/10.95 Q[]$ \T1/cmr/m/n/10.95 pie-na; gra-fi-co so-lo
+ []
+
+LaTeX Font Info:    Font shape `T1/cmtt/bx/n' in size <10.95> not available
+(Font)              Font shape `T1/cmtt/m/n' tried instead on input line 567.
+[12]
+
+LaTeX Warning: File `output_data/ABRAMSON1965/ABRAMSON1965_ImQ_from_qmodal_vs_m
+easured.png' not found on input line 589.
+
+
+! Package pdftex.def Error: File `output_data/ABRAMSON1965/ABRAMSON1965_ImQ_fro
+m_qmodal_vs_measured.png' not found: using draft setting.
+
+See the pdftex.def package documentation for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.589 ...SON1965_ImQ_from_qmodal_vs_measured.png}}
+                                                  
+Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+[13]
+Overfull \hbox (145.2852pt too wide) in paragraph at lines 598--600
+[]\T1/cmr/m/n/10.95 Tabella mi-su-ra-ta: \T1/cmtt/m/n/10.95 docs/resources/benc
+hmarks/abramson1965_report/abramson_measured_coefficients_span50.csv 
+ []
+
+
+Overfull \hbox (84.16869pt too wide) in paragraph at lines 600--602
+[]\T1/cmr/m/n/10.95 Confronto com-ple-to (ri-ge-ne-ra $\OML/cmm/m/it/10.95 Q\OT
+1/cmr/m/n/10.95 (\OML/cmm/m/it/10.95 k\OT1/cmr/m/n/10.95 )$ \T1/cmr/m/n/10.95 d
+a Qjj): \T1/cmtt/m/n/10.95 examples/ABRAMSON1965/run_imq_vs_measured_comparison
+.py 
+ []
+
+
+Overfull \hbox (77.94398pt too wide) in paragraph at lines 602--604
+[]\T1/cmr/m/n/10.95 Post-processing ra-pi-do da CSV esi-sten-te: \T1/cmtt/m/n/1
+0.95 examples/ABRAMSON1965/postprocess_imq_from_qmodal_csv.py 
+ []
+
+
+Overfull \hbox (12.66293pt too wide) in paragraph at lines 610--613
+[]\T1/cmr/bx/n/10.95 Abramson \T1/cmr/m/n/10.95 mi-su-ra in gal-le-ria le ri-sp
+o-ste ae-ro-di-na-mi-che oscil-la-to-ri se-zio-na-li $\OML/cmm/m/it/10.95 L[]; 
+L[]; M[]; M[]$
+ []
+
+
+Overfull \hbox (8.67984pt too wide) in paragraph at lines 626--633
+\T1/cmr/m/n/10.95 E' sta-ta ese-gui-ta la li-nea \T1/cmr/bx/n/10.95 Ro-ger RFA 
++ strip \T1/cmr/m/n/10.95 (\T1/cmtt/m/n/10.95 roger_fit=True\T1/cmr/m/n/10.95 ,
+ \T1/cmtt/m/n/10.95 added_mass_strip_theory=True\T1/cmr/m/n/10.95 ,
+ []
+
+
+Overfull \hbox (37.78912pt too wide) in paragraph at lines 626--633
+\T1/cmtt/m/n/10.95 rfa_apply_b2_mass=False\T1/cmr/m/n/10.95 ) con sweep $\OML/c
+mm/m/it/10.95 V \OMS/cmsy/m/n/10.95 2 \OT1/cmr/m/n/10.95 [1 m\OML/cmm/m/it/10.9
+5 =\OT1/cmr/m/n/10.95 s\OML/cmm/m/it/10.95 ; \OT1/cmr/m/n/10.95 23 m\OML/cmm/m/
+it/10.95 =\OT1/cmr/m/n/10.95 s]$\T1/cmr/m/n/10.95 . Il sol-ver idroe-la-sti-co 
+com-ple-to \T1/cmtt/m/n/10.95 RFA_PK_method
+ []
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 654.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `subscript' on input line 654.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 654.
+
+
+LaTeX Warning: File `output_data/ABRAMSON1965/vdelta_vf_Imq_scaled_05_RFA.png' 
+not found on input line 664.
+
+
+! Package pdftex.def Error: File `output_data/ABRAMSON1965/vdelta_vf_Imq_scaled
+_05_RFA.png' not found: using draft setting.
+
+See the pdftex.def package documentation for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.664 ...SON1965/vdelta_vf_Imq_scaled_05_RFA.png}}
+                                                  
+Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+[14]
+
+LaTeX Warning: File `output_data/ABRAMSON1965/vdelta_vf_Imq_scaled_04_RFA.png' 
+not found on input line 672.
+
+
+! Package pdftex.def Error: File `output_data/ABRAMSON1965/vdelta_vf_Imq_scaled
+_04_RFA.png' not found: using draft setting.
+
+See the pdftex.def package documentation for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.672 ...SON1965/vdelta_vf_Imq_scaled_04_RFA.png}}
+                                                  
+Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+[15]
+Overfull \hbox (97.0835pt too wide) in paragraph at lines 691--696
+\T1/cmr/m/n/10.95 in \T1/cmtt/m/n/10.95 docs/resources/benchmarks/notes/ \T1/cm
+r/m/n/10.95 e sal-va-ti in \T1/cmtt/m/n/10.95 abramson_fig5_digitized.csv\T1/cm
+r/m/n/10.95 , \T1/cmtt/m/n/10.95 abramson_fig6_digitized.csv
+ []
+
 PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_fig5_
 digitized.csv}
-PGFPlots: reading {output_data/vlambda_data.csv}
-PGFPlots: reading {output_data/vlambda_data.csv}
+PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_fig5_
+digitized.csv}
+PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_rfa_s
+trip_selected.csv}
+PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_rfa_s
+trip_selected.csv}
+
+Underfull \hbox (badness 1484) in paragraph at lines 727--727
+[]\T1/cmr/m/n/10.95 Figura 12: |Con-fron-to $\OML/cmm/m/it/10.95 ^^N\OT1/cmr/m/
+n/10.95 (\OML/cmm/m/it/10.95 V\OT1/cmr/m/n/10.95 )$\T1/cmr/m/n/10.95 : da-ti e 
+cur-va 3 ri-di-gi-ta-liz-za-ti vs RFA+strip ($\OML/cmm/m/it/10.95 ^^P \OT1/cmr/
+m/n/10.95 = 0[]03$\T1/cmr/m/n/10.95 ,
+ []
+
+[16]
 PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_fig6_
 digitized.csv}
-PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_curre
-nt_selected.csv}
-PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_curre
-nt_selected.csv}
- [9] [10]
+PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_fig6_
+digitized.csv}
+PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_rfa_s
+trip_selected.csv}
+PGFPlots: reading {docs/resources/benchmarks/abramson1965_report/abramson_rfa_s
+trip_selected.csv}
+ [17] [18]
 (docs/resources/benchmarks/abramson1965_report/build/abramson1965_current_repor
 t.aux)
 Package rerunfilecheck Info: File `abramson1965_current_report.out' has not cha
 nged.
-(rerunfilecheck)             Checksum: E7A48E7BC4862563A35F22E8C8A61114;1755.
+(rerunfilecheck)             Checksum: BE14AF926742205EDD86857201BD3197;5465.
  ) 
 Here is how much of TeX's memory you used:
- 37069 strings out of 480122
- 880574 string characters out of 5893078
- 1307658 words of memory out of 5000000
- 54425 multiletter control sequences out of 15000+600000
- 487990 words of font info for 76 fonts, out of 8000000 for 9000
+ 37357 strings out of 480122
+ 896180 string characters out of 5893078
+ 1377237 words of memory out of 5000000
+ 54637 multiletter control sequences out of 15000+600000
+ 490474 words of font info for 85 fonts, out of 8000000 for 9000
  81 hyphenation exceptions out of 8191
- 99i,19n,94p,794b,2337s stack positions out of 5000i,500n,10000p,200000b,80000s
- </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/ecti1095.6
-00pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/ecbx109
+ 99i,19n,94p,794b,2327s stack positions out of 5000i,500n,10000p,200000b,80000s
+ </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/ecbx1200.6
+00pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/ecti109
 5.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/ecbx
-1200.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/e
+1095.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/e
 crm0800.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/e
 c/tcrm0800.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jknappe
 n/ec/tcrm1095.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/jkna
 ppen/ec/ectt1095.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfour/j
 knappen/ec/ecrm1095.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/ljfou
 r/jknappen/ec/ecbx1440.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk/lj
-four/jknappen/ec/ecti1000.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk
-/ljfour/jknappen/ec/ecrm1000.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts
-/pk/ljfour/jknappen/ec/ecbx1000.600pk> </home/lorenzo/.texlive2021/texmf-var/fo
-nts/pk/ljfour/jknappen/ec/ecrm1200.600pk> </home/lorenzo/.texlive2021/texmf-var
-/fonts/pk/ljfour/jknappen/ec/ecrm1728.600pk></usr/share/texlive/texmf-dist/font
-s/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/fonts/type
-1/public/amsfonts/cm/cmmi7.pfb></usr/share/texlive/texmf-dist/fonts/type1/publi
-c/amsfonts/cm/cmmi8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfo
-nts/cm/cmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/
-cmr8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.p
-fb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></us
-r/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msam10.pfb>
+four/jknappen/ec/ectt1000.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts/pk
+/ljfour/jknappen/ec/ecti1000.600pk> </home/lorenzo/.texlive2021/texmf-var/fonts
+/pk/ljfour/jknappen/ec/ecrm1000.600pk> </home/lorenzo/.texlive2021/texmf-var/fo
+nts/pk/ljfour/jknappen/ec/ecbx1000.600pk> </home/lorenzo/.texlive2021/texmf-var
+/fonts/pk/ljfour/jknappen/ec/ecrm1200.600pk> </home/lorenzo/.texlive2021/texmf-
+var/fonts/pk/ljfour/jknappen/ec/ecrm1728.600pk></usr/share/texlive/texmf-dist/f
+onts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texlive/texmf-dist/fonts/t
+ype1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/fonts/type1/p
+ublic/amsfonts/cm/cmmi12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/
+amsfonts/cm/cmmi7.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfont
+s/cm/cmmi8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cm
+r10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb
+></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/s
+hare/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/share/tex
+live/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/t
+exmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texlive/texmf-di
+st/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/share/texlive/texmf-dist/font
+s/type1/public/amsfonts/symbols/msam10.pfb>
 Output written on docs/resources/benchmarks/abramson1965_report/build/abramson1
-965_current_report.pdf (10 pages, 1503282 bytes).
+965_current_report.pdf (18 pages, 1030613 bytes).
 PDF statistics:
- 583 PDF objects out of 1000 (max. 8388607)
- 184 compressed objects within 2 object streams
- 39 named destinations out of 1000 (max. 500000)
- 132 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 862 PDF objects out of 1000 (max. 8388607)
+ 334 compressed objects within 4 object streams
+ 95 named destinations out of 1000 (max. 500000)
+ 206 words of extra memory for PDF output out of 10000 (max. 10000000)
 

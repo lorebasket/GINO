@@ -1,0 +1,164 @@
+================================================================================
+  CAPYTAINE — ADDED MASS: METODI E PERCORSO STRIP-STYLE
+================================================================================
+  Repository : FSI (caso ABRAMSON1965)
+  Modulo strip-style : FLUID/capytaine/capytaine_strip_projection.py
+  Integrazione flutter : COUPLING/flutter_solver.py (RFA_PK_method)
+  Metodologia generale : FLUID/capytaine/CAPYTAINE_ADDED_MASS_AND_DAMPING_METHOD.txt
+  Data : 2026-06-22
+
+--------------------------------------------------------------------------------
+1. PANORAMICA — TRE MODI DI OTTENERE ADDED MASS DA CAPYTAINE
+--------------------------------------------------------------------------------
+
+  (A) BEM MODALE  [capytaine_added_mass_source = 'modal']
+      run_modal_radiation.py con autovettori mappati sulla mesh.
+      Output: A(ω), B(ω) n_modes×n_modes direttamente dallo spazio modale.
+      Uso flutter: RFA_PK_method → A_∞, B_∞ asintotici embedded in M_eff, C_eff.
+      Più fisico per modi flesso-torsionali (accoppiamento off-diagonal, geometria 3D).
+
+  (B) BEM CORPO RIGIDO  [run_modal_radiation.py --rigid-body]
+      Sei DOF Capytaine (Surge, Sway, Heave, Roll, Pitch, Yaw).
+      Output: A(ω), B(ω) 6×6 nel frame idrodinamico.
+      Serve come input al percorso strip-style (C).
+
+  (C) STRIP-STYLE  [capytaine_added_mass_source = 'stripstyle']
+      capytaine_strip_projection.py
+      NON risolve BEM modale: riusa la STESSA formula della strip theory analitica
+      ma con m_a' sezionale ricavato dal BEM rigido 3D invece di m_a' = ρπc²/4.
+
+  Confronto rapido (ABRAMSON1965, diagonali modali [kg], Φ mass-normalizzato):
+
+    strip analitica     [0.516, 0.878, 0.140, 0.186]
+    capy strip-style    [0.414, 0.706, 0.113, 0.149]  (~80 % strip)
+    capy BEM modale     [0.198, 1.994, 0.374, 0.363]  (modo-dipendente)
+
+--------------------------------------------------------------------------------
+2. METODO STRIP-STYLE — PASSI DETTAGLIATI
+--------------------------------------------------------------------------------
+
+  Funzione principale:
+    capytaine_added_mass_projection_like_strip(structural_results, config)
+
+  Pipeline:
+
+  2.1  BEM corpo rigido
+  ─────────────────────
+    python FLUID/capytaine/run_modal_radiation.py --case-name <CASE> \\
+        --rigid-body --out-dir <capytaine_results_dir>/rigid_body
+
+    File: rigid_body/modal_radiation_rigid_AB_depth_<d>.npz
+    Contiene added_mass (n_ω, 6, 6) per Surge…Yaw.
+
+    IMPORTANTE: ricalcolare il rigid_body quando cambiano mesh, depth, water_depth
+    o omega_list. Cache obsoleta ha dato ~11 % della strip invece di ~80 %.
+
+  2.2  Asintoto A_∞ (6×6)
+  ───────────────────────
+    asymptotic_added_mass_6x6(capy_rigid_data, omega_cut_fraction=0.85)
+    → media di A(ω) sulla coda alta-ω, simmetrizzata.
+
+  2.3  m_a' sezionale da A_∞ rigido
+  ─────────────────────────────────
+    m_a_prime_per_axis_from_rigid_added_mass(A6, config):
+
+      • Blocco traslazionale 3×3 di A_∞ (frame idro)
+      • Rotazione nel frame strutturale: M_t_ref = Rᵀ M_t_hydro R
+        (stessa R di build_capytaine_mesh / beam)
+      • Per ogni asse trasversale allo span (strip_theory_span_axis):
+            m_a'[axis] = M_t_ref[axis, axis] / L
+
+    Esempio ABRAMSON1965 (water_depth=2 m, depth=0.05 m):
+      strip m_a' analitico     ≈ 72.75 kg/m  (ρπc²/4 su X e Z)
+      capy m_a' da rigid A_∞   ≈ [0.87, 0, 58.48] kg/m  (X, Y, Z ref)
+      → asse dominante ~80 % della strip; l'altro asse trasversale molto più basso
+        (geometria 3D + immersione parziale, non simmetria 2D).
+
+  2.4  Lumping fisico 1D (identico alla strip theory)
+  ───────────────────────────────────────────────────
+    mass_matrix_capytaine_strip_style(M_global, config, A6)
+      → chiama mass_matrix_lumped_transverse() come structural_analysis.strip
+
+    Costruisce M_add sui DOF traslatori trasversali del beam (dy, span_axis, scale).
+
+  2.5  Proiezione modale
+  ──────────────────────
+    M_hat_added = Φᵀ M_add Φ
+
+    Φ = autovettori dry mass-normalizzati (stessi del flutter solver).
+    Stessa convenzione di added_mass_projection() in structural_analysis.py.
+
+    Se dihedral_rotate_beam=True (es. Abramson −90°), M_add viene ruotato con la
+    stessa congruenza T di post_dihedral_utils prima della proiezione, così Φ e
+    M_add stanno nello stesso frame globale (necessario nel flutter dopo main.py).
+
+  2.6  Export per il flutter
+  ─────────────────────────
+    load_or_compute_stripstyle_M_hat_added() salva:
+      <capytaine_results_dir>/capytaine_stripstyle_M_hat_added.npz
+
+    Contenuto:
+      M_hat_added      (n_modes, n_modes)
+      modal_diag       diagonale [kg]
+      rigid_npz_path   file rigid-body usato
+      method           'capytaine_stripstyle_projection'
+
+--------------------------------------------------------------------------------
+3. USO NEL FLUTTER SOLVER
+--------------------------------------------------------------------------------
+
+  Config:
+    RFA_PK_method = True
+    added_mass_strip_theory = False    # no doppio conteggio
+    capytaine_added_mass_source = 'stripstyle'
+    pk_capytaine_matrices = False      # A costante, non ω-dipendente
+
+  In _solve_RFA_PK_method (flutter_solver.py):
+    • Carica M_hat_added strip-style (matrice costante)
+    • A_emb = M_hat_added, B_emb = 0
+    • M_eff = M_hat + A_emb nel loop Roger RFA
+    • Stesso tracking MAC / Roger del baseline _baseline_rfa_capytaine
+
+  Differenza rispetto a _baseline_rfa_strip:
+    • strip: m_a' = ρπc²/4 analitico, roger_fit=True (no Capytaine nel solver)
+    • striplike: m_a' da Capytaine rigid 3D, RFA_PK_method=True (stesso EOM idro)
+
+  Differenza rispetto a _baseline_rfa_capytaine:
+    • capytaine: A_∞ da BEM modale (face fields per modo)
+    • striplike: A_∞ da rigid + lumping strip (≈80 % strip, no off-diagonal BEM modale)
+
+--------------------------------------------------------------------------------
+4. COMANDI E FILE DI RIFERIMENTO
+--------------------------------------------------------------------------------
+
+  # Confronto numerico strip / BEM / strip-style
+  python FLUID/capytaine/ABRAMSON1965/compare_added_mass_projection.py
+
+  # Flutter baseline strip-style (output dedicato)
+  python examples/ABRAMSON1965/run_baseline_rfa_capytaine_striplike.py
+
+  # Oppure via sensitivity runner
+  python examples/ABRAMSON1965/run_rerun_existing_sensitivity.py \\
+      --only baseline --baseline-id _baseline_rfa_capytaine_striplike --force
+
+  Output flutter:
+    output_data/ABRAMSON1965/baseline_sensitivity/_baseline_rfa_capytaine_striplike/
+
+  Matrici esportate (riutilizzabili):
+    FLUID/capytaine/ABRAMSON1965/results_modal_radiation/
+      capytaine_stripstyle_M_hat_added.npz
+      added_mass_projection_comparison.json
+
+--------------------------------------------------------------------------------
+5. PARAMETRO CONFIG
+--------------------------------------------------------------------------------
+
+  capytaine_added_mass_source :
+    'modal'      → default; BEM modale A(ω), B(ω)
+    'stripstyle' → rigid A_∞ + lumping strip + Φᵀ M_add Φ
+
+  Non combinare con added_mass_strip_theory=True (doppio conteggio).
+
+================================================================================
+  FINE DOCUMENTO
+================================================================================

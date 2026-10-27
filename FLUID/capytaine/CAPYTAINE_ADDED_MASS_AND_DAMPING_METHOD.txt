@@ -1,0 +1,419 @@
+================================================================================
+  CALCOLO ADDED MASS E SMORZAMENTO IDRODINAMICO CON CAPYTAINE — METODOLOGIA FSI
+================================================================================
+  Repository : FSI (es. caso ABRAMSON1965)
+  Script principale : FLUID/capytaine/run_modal_radiation.py
+  Mesh            : FLUID/capytaine/build_capytaine_mesh.py
+  Integrazione flutter : COUPLING/flutter_solver.py (RFA_PK_method, pk_capytaine_matrices)
+  Data            : 2026-06-22 (validazione numerica aggiornata)
+
+--------------------------------------------------------------------------------
+1. GRANDEZZE FISICHE
+--------------------------------------------------------------------------------
+
+Capytaine (BEM, fluido potenziale lineare) calcola per ogni frequenza angolare ω:
+
+  A(ω)  — added mass (massa aggiunta generalizzata)     [kg]     matrice n×n
+  B(ω)  — radiation damping (smorzamento da onde uscenti) [kg/s] matrice n×n
+
+IMPORTANTE — terminologia:
+  • B(ω) NON è lo smorzamento viscoso molecolare (Reynolds, attrito di parete).
+  • B(ω) è lo smorzamento RADIATIVO: energia trasportata all’infinito dalle onde
+    generate dal moto del corpo. In acqua profonda tende a 0 per ω → ∞.
+  • Lo smorzamento viscoso empirico (se attivo) è separato:
+    config.empirical_fluid_damping in flutter_solver.py.
+
+Le matrici sono simmetriche (nel post-processing si usa spesso la media con la
+trasposta per simmetrizzare eventuali errori numerici).
+
+--------------------------------------------------------------------------------
+2. PERCORSI DISPONIBILI NEL CODICE
+--------------------------------------------------------------------------------
+
+Nel repository esistono TRE approcci distinti:
+
+  (A) BEM MODALE — run_modal_radiation.py  [PIÙ FISICO per modi strutturali]
+      Risolve la radiazione con campi di velocità normali sulla carena derivati
+      dagli autovettori strutturali mappati sulla mesh. Restituisce A(ω), B(ω)
+      direttamente nello spazio modale (n_modes × n_modes).
+
+  (B) BEM CORPO RIGIDO — run_modal_radiation.py --rigid-body
+      Sei DOF Capytaine (Surge, Sway, Heave, Roll, Pitch, Yaw). Utile per
+      calibrare m_a' sezionale o confronti con strip theory.
+
+  (C) PROIEZIONE STRIP-STYLE — capytaine_strip_projection.py
+      Prende A_∞ rigido (6×6), ricava m_a' = A_ii/L, lumping 1D come strip
+      theory, poi M_hat_add = Φᵀ M_add Φ. Stessa formula della strip analitica
+      ma con m_a' da Capytaine. NON è BEM 3D modale.
+
+Per trovare il metodo fisicamente più corretto per modi flesso-torsionali di
+un’ala immersa, il percorso (A) è quello previsto e implementato nel workflow
+principale (capytaine_workflow.py → ensure_capytaine_matrices).
+
+Il percorso (C) serve solo per confronti metodologici con strip theory
+(compare_added_mass_projection.py), non per sostituire (A).
+
+--------------------------------------------------------------------------------
+3. METODO RACCOMANDATO — PIPELINE BEM MODALE (A)
+--------------------------------------------------------------------------------
+
+3.1  Analisi strutturale dry
+────────────────────────────
+  • structural_analysis.run_dry_analysis → eigh(K, M) sui DOF liberi.
+  • Autovettori Φ mass-normalizzati: Φᵀ M Φ = I (scipy.linalg.eigh).
+  • Salvati in output_data/<CASE>/<CASE>_dry_egv_*.csv se save_modal_data=True.
+
+3.2  Costruzione mesh idrodinamica
+──────────────────────────────────
+  Script: build_capytaine_mesh.py --case_name <CASE>
+
+  • Sezione da config.raw, loft spanwise, dihedral α, wing dihedral, sweep.
+  • Frame idro: R = R_x(Γ_x) · R_y(α) · R_y(Γ_y) come nel beam FEA (dopo loft).
+  • Mesh chiusa watertight (quad), esportata come .vtu.
+  • Profondità: mesh traslata in z se config.mesh_depth / depth nel run BEM.
+
+3.3  Export CSV e cache (capytaine_workflow.py)
+───────────────────────────────────────────────
+  ensure_capytaine_matrices(config, structural_results, beam_model):
+
+    1. Scrive CSV dry in modal_dir (nodes, constrained_dofs, eigendata).
+    2. Lancia run_modal_radiation.py se cache NPZ non valida.
+    3. Salva fingerprint (source_*) per invalidare cache se cambiano mesh/φ/ω.
+
+  ATTENZIONE CACHE: il fingerprint copre il NPZ modale in capytaine_results_dir,
+  ma il NPZ corpo rigido (rigid_body/) è un file separato. Se si aggiorna mesh o
+  config, ricalcolare ENTRAMBI:
+    • python run_modal_radiation.py --case-name <CASE>
+    • python run_modal_radiation.py --case-name <CASE> --rigid-body \
+        --out-dir .../rigid_body
+  Un rigid_body obsoleto ha prodotto capy_stripstyle ≈ 11% della strip invece del
+  valore corretto ≈ 80% (vedi §5 e §10).
+
+3.4  Mapping autovettori beam → spostamenti faccia
+───────────────────────────────────────────────────
+  Funzione: _build_face_displacements_from_beam() in run_modal_radiation.py
+
+  Input:
+    • face_centers — centri faccia mesh nel frame strutturale NON traslato in
+      profondità (si annulla z -= depth applicato alla mesh per l’interpolazione).
+    • CSV: *_nodes.csv, *_constrained_dofs.csv, *_eigendata.csv
+    • mode_indices — righe 0..num_modes_egv-1 in eigendata.csv
+
+  Passi per ogni modo:
+
+    (1) Ricostruzione φ_full (n_nodes×6 DOF):
+        DOF vincolati = 0 (root clamped).
+
+    (2) Allineamento frame idro:
+        Se necessario, ruota posizioni beam e φ con R = R_x(Γ) R_y(α) R_y(Γ_y)
+        (stessa convenzione di build_capytaine_mesh.py).
+        Skip se dihedral_rotate_beam=True e CSV già nel frame idro.
+
+    (3) Normalizzazione geometrica (default: capytaine_phi_normalization='geometric'):
+        s = max|φ| su tutti i 6 DOF/nodo
+        φ_bem = φ / s
+        Motivo: il BEM definisce il DOF modale con ampiezza O(1) sulla carena;
+        poi A,B vengono riconvertiti nella base mass-normalizzata (vedi §3.6).
+
+    (4) Interpolazione lungo lo span:
+        Per ogni centro faccia p, si trovano due nodi beam che bracketano
+        p lungo span_axis (config.capytaine_modal_span_axis, beam_span_axis,
+        o inferito dall’estensione massima dei nodi nel frame idro).
+
+    (5) Cinematica sezione rigida (Euler-Bernoulli):
+        d(p) = u + θ × (p − x_ea)
+        con u, θ, x_ea interpolati linearmente tra i nodi beam.
+
+    (6) Output: face_displacements[mode, face, 3] assegnato a body.dofs[mode_i].
+
+  NOTA FISICA: il mapping assume sezione rigida; non c’è warping né deformazione
+  in-plane della sezione sulla mesh. È l’approssimazione principale rispetto a
+  un BEM su mesh deformata con tutti i DOF FEA.
+
+3.5  Risoluzione BEM Capytaine
+──────────────────────────────
+  Per ogni depth in config.depth:
+    • Carica mesh, traslazione z -= depth (immersione).
+    • FloatingBody + body.dofs[mode_i] = face_disp[i]
+    • Per ogni (ω, modo_radiante):
+          RadiationProblem(body, radiating_dof=mode_name, omega, rho,
+                           water_depth, free_surface)
+    • BEMSolver().solve_all() → assemble_dataset
+    • Estrazione added_mass, radiation_damping → (n_ω, n_modes, n_modes)
+
+  Parametri fluido (da config):
+    • rho_f[fluid]     — densità [kg/m³]
+    • water_depth      — profondità acqua ('inf' = infinita)
+    • free_surface_elevation — z superficie libera (0 = z=0)
+    • omega_list       — griglia ω [rad/s]
+
+3.6  Riconversione nella base mass-normalizzata
+───────────────────────────────────────────────
+  Se normalize_phi attivo e phi_bem_scale_factors s ≠ 1:
+
+    A_mass(ω)[i,j] = A_bem(ω)[i,j] · s[i] · s[j]
+    B_mass(ω)[i,j] = B_bem(ω)[i,j] · s[i] · s[j]
+
+  Il NPZ salva added_mass_modal_basis = 'mass_normalized'.
+
+  Giustificazione: il flutter usa coordinate modali q con Φ mass-normalizzato
+  (Φᵀ M Φ = I). Il fattore s² riallinea le matrici idrodinamiche a quella
+  convenzione. Senza questo passo (capytaine_phi_normalization='none') le A,B
+  sarebbero sottostimate di ~s² rispetto al sistema modale del solver.
+
+3.7  Salvataggio risultati
+──────────────────────────
+  File: <capytaine_results_dir>/modal_radiation_AB[_depth_<d>].npz
+
+  Contenuto principale:
+    omega              (n_ω,)
+    added_mass         (n_ω, n_modes, n_modes)
+    added_damping      (n_ω, n_modes, n_modes)  [alias: radiation_damping]
+    face_displacements (n_modes, n_faces, 3)
+    phi_bem_scale_factors, phi_bem_normalization
+    metadata: depth, mesh_path, mode_names, source_* fingerprint
+
+--------------------------------------------------------------------------------
+4. USO NEL FLUTTER (COUPLING/flutter_solver.py)
+--------------------------------------------------------------------------------
+
+4.1  Caricamento
+────────────────
+  _load_capytaine_modal_radiation(config) → NPZ da capytaine_results_dir
+  (depth selezionato da config.depth_index).
+
+4.2  Valori asintotici A_∞, B_∞
+───────────────────────────────
+  _capytaine_asymptotic_modal_matrices():
+    • Media di A(ω), B(ω) sulla coda alta-ω (ω ≥ ω_cut).
+    • Default: ω_cut = ω_min + 0.5·(ω_max − ω_min), almeno 0.8·min(ω_n strutturali).
+    • A_∞ ≈ plateau di added mass; B_∞ → 0 in acqua profonda (onde uscenti).
+
+4.3  RFA_PK_method (baseline _baseline_rfa_capytaine)
+─────────────────────────────────────────────────────
+  • added_mass_strip_theory = False  (no doppio conteggio)
+  • A_∞, B_∞ embedded in M_eff, C_eff come costanti (no interpolazione ω nel PK).
+  • M_eff = M_hat + A_emb
+  • C_eff = C_hat + B_emb  (+ eventuale smorzamento empirico separato)
+  • Roger RFA per parte circolatoria aerodinamica (DLM).
+
+4.4  pk_capytaine_matrices
+──────────────────────────
+  Usa A(ω), B(ω) frequenza-dipendenti nel loop PK (interpolazione su ω).
+
+4.5  Indici modali
+──────────────────
+  • capytaine_apply_mode_indices — quali DOF modali ricevono A,B
+  • capytaine_source_mode_indices — mapping righe/colonne nel tensore Capytaine
+  • Default: primi num_modes_egv modi dry
+
+--------------------------------------------------------------------------------
+5. PERCORSO ALTERNATIVO — STRIP-STYLE (solo confronto)
+--------------------------------------------------------------------------------
+
+  capytaine_strip_projection.capytaine_added_mass_projection_like_strip():
+
+    1. run_modal_radiation --rigid-body → A_∞ (6×6)
+    2. Blocco traslazionale 3×3 → frame strutturale via Rᵀ M_t R
+    3. m_a'[axis] = A_∞[axis,axis] / L  (assi trasversali allo span)
+    4. mass_matrix_lumped_transverse() — stesso lumping della strip theory
+    5. M_hat_add = Φᵀ M_add Φ  (Φ mass-normalizzato)
+
+  Confronto numeri ABRAMSON1965 (diagonali modali, kg; stessa Φ mass-norm;
+  water_depth=2 m, depth=0.0508 m, NPZ aggiornati 2026-06-22):
+
+    strip           = [0.516, 0.878, 0.140, 0.186]
+    capy_stripstyle = [0.414, 0.706, 0.113, 0.149]  (~80% della strip)
+    capy_bem        = [0.198, 1.994, 0.374, 0.363]
+
+    Rapporti capy_strip / strip  ≈ [0.80, 0.80, 0.80, 0.80]  (uniforme)
+    Rapporti capy_bem  / strip   ≈ [0.38, 2.27, 2.67, 1.95]  (modo-dipendente)
+
+  Interpretazione:
+    • capy_stripstyle con rigid NPZ allineato alla mesh attuale si avvicina alla
+      strip (~80%), non la replica esattamente (m_a' da BEM 3D ≠ ρπc²/4).
+    • capy_bem è fisicamente diverso: accoppiamenti off-diagonal (es. A₁₂≈−0.48 kg,
+      A₂₃≈−0.61 kg) e forma modale sulla carena → rapporti non uniformi.
+    • Valori storici capy_strip ≈ 11% strip erano da rigid_body NPZ obsoleto.
+
+  Questo percorso NON sostituisce il BEM modale: riusa la formula strip.
+
+--------------------------------------------------------------------------------
+6. QUAL È IL METODO FISICAMENTE PIÙ CORRETTO?
+--------------------------------------------------------------------------------
+
+  Per modi flesso-torsionali di un profilo immerso con mesh 3D:
+
+  ★ RACCOMANDATO: BEM modale (A) con:
+      • mesh watertight allineata al beam (build_capytaine_mesh + allineamento R)
+      • depth e free_surface coerenti con l’esperimento
+      • capytaine_phi_normalization='geometric' + riconversione scale²
+      • A(ω), B(ω) usati come A_∞, B_∞ (RFA_PK) o ω-dipendenti (PK+Capytaine)
+
+  Perché è più fisico della strip:
+      • Geometria 3D reale (spessore, estremità, profondità finita se impostata)
+      • Accoppiamento idrodinamico tra modi (termini fuori diagona A_ij, B_ij)
+      • Campo di velocità normale coerente con la forma modale sulla carena
+      • Superficie libera e fondale (se non infiniti)
+
+  Limiti / approssimazioni da tenere presenti:
+      • Fluido potenziale invscido (no viscosità, no separazione)
+      • Mapping beam → facce: sezione rigida + interpolazione 1D lungo span
+      • Mesh rigidamente traslata in profondità (no deformazione statica mesh)
+      • B(ω) = smorzamento radiativo, non viscoso
+      • Frequenza ω nel BEM: in RFA_PK si usa A_∞ costante (no ω variabile nel passo)
+
+  NON usare per “maggiore accuratezza con stessa metodologia strip”:
+      • Il percorso (C) strip-style è solo per diagnosi comparativa.
+
+--------------------------------------------------------------------------------
+7. COMANDI TIPICI (caso ABRAMSON1965)
+--------------------------------------------------------------------------------
+
+  # 1) Mesh
+  python FLUID/capytaine/build_capytaine_mesh.py --case_name ABRAMSON1965
+
+  # 2) Analisi dry + BEM (via main.py / ensure_capytaine_matrices) oppure:
+  python FLUID/capytaine/run_modal_radiation.py --case_name ABRAMSON1965
+
+  # 3) Debug proiezione modi sulla mesh
+  python FLUID/capytaine/run_modal_radiation.py --case_name ABRAMSON1965 \
+      --plot-mode-projection-debug
+
+  # 4) Confronto strip / BEM / strip-style
+  python FLUID/capytaine/ABRAMSON1965/compare_added_mass_projection.py
+
+  # 5) Corpo rigido (per calibrazione m_a'; ricalcolare insieme al modale)
+  python FLUID/capytaine/run_modal_radiation.py --case_name ABRAMSON1965 \
+      --rigid-body --out-dir FLUID/capytaine/ABRAMSON1965/results_modal_radiation/rigid_body
+
+  # 6) Validazione analitica + workflow (Tier 1–3)
+  python FLUID/capytaine/validate_added_mass_benchmarks.py --case-name ABRAMSON1965
+
+  # 7) Validazione idrodinamica modale (plateau A/B, proiezione facce, PNG)
+  python FLUID/capytaine/ABRAMSON1965/plot_capytaine_hydro_validation.py
+
+--------------------------------------------------------------------------------
+8. PARAMETRI CHIAVE IN config (es. config_ABRAMSON1965.py)
+--------------------------------------------------------------------------------
+
+  capytaine_phi_normalization = 'geometric'   # max|φ|→1 al BEM; A,B in base mass-norm
+  capytaine_results_dir         → cartella NPZ
+  mesh_path                     → .vtu idro
+  omega_list                    → griglia ω BEM
+  depth / depth_index           → immersione [m] (es. 0.0508 m sotto z=0)
+  free_surface_elevation        → z superficie libera (0)
+  water_depth                   → profondità colonna d’acqua [m] o np.inf;
+                                  fondale a z = free_surface − water_depth
+                                  (con depth=0.05 m e water_depth=2 m il fondale
+                                  è a −2 m, ~1.2 m sotto l’ala → effetto nullo)
+  num_modes_egv                 → n modi risolti nel BEM
+  RFA_PK_method                 → True per Roger + A_∞, B_∞ Capytaine
+  added_mass_strip_theory       → False se si usa solo Capytaine (evitare doppio conteggio)
+  pk_capytaine_matrices         → True per A(ω), B(ω) nel PK
+
+--------------------------------------------------------------------------------
+9. RIFERIMENTI FILE SORGENTE
+--------------------------------------------------------------------------------
+
+  FLUID/capytaine/run_modal_radiation.py      — BEM modale, mapping beam→faccia
+  FLUID/capytaine/build_capytaine_mesh.py     — geometria mesh
+  FLUID/capytaine/capytaine_workflow.py       — cache, export CSV, orchestrazione
+  FLUID/capytaine/modal_radiation_io.py       — formato NPZ
+  FLUID/capytaine/capytaine_strip_projection.py — percorso strip-style (confronto + flutter)
+  FLUID/capytaine/CAPYTAINE_STRIPSTYLE_ADDED_MASS_METHOD.txt — metodo strip-style dettagliato
+  STRUCTURE/FEA/structural_analysis.py        — strip: Φᵀ M_add Φ
+  COUPLING/flutter_solver.py                  — A_∞, B_∞ in M_eff, C_eff
+  examples/ABRAMSON1965/config_ABRAMSON1965.py — parametri caso
+  FLUID/capytaine/validate_added_mass_benchmarks.py — benchmark analitici
+  FLUID/capytaine/ABRAMSON1965/plot_capytaine_hydro_validation.py — validazione modale
+  FLUID/capytaine/ABRAMSON1965/compare_added_mass_projection.py — confronto 3 vie
+  .../results_modal_radiation/validation_summary.json — esito validazione 2026-06-22
+
+--------------------------------------------------------------------------------
+10. VALIDAZIONE NUMERICA (ABRAMSON1965, 2026-06-22)
+--------------------------------------------------------------------------------
+
+10.1  Script eseguiti
+─────────────────────
+  validate_added_mass_benchmarks.py   — Tier 1 analitico + Tier 3 Heave consistency
+  compare_added_mass_projection.py    — strip vs capy_bem vs capy_stripstyle
+  plot_capytaine_hydro_validation.py  — plateau A(ω), proiezione modi, PNG
+
+  Riepilogo JSON: FLUID/capytaine/ABRAMSON1965/results_modal_radiation/
+                  validation_summary.json
+
+10.2  Tier 1 — benchmark analitici (controllo scaling BEM)
+──────────────────────────────────────────────────────────
+  Sfera (A = 2/3 πρR³, fluido infinito):     +2–4 %  → PASS (±5 %)
+  Cilindro orizzontale Heave (A ≈ πρR²L):   −13 %   → da raffinare mesh
+  Abramson Heave rigid vs custom face DOF:    0 %    → PASS (valida body.dofs path)
+
+  Conclusione: nessun errore sistematico ×3–10 nel solver o nel mapping face-DOF.
+
+10.3  Tier 2 — ordine di grandezza wing rigido vs strip
+───────────────────────────────────────────────────────
+  Sway rigid-body @ ω=5 rad/s:  A ≈ 47.5 kg
+  Strip 2-D m_a'·L:             A ≈ 55.4 kg   → rapporto 0.86×
+
+  La strip usa m_a' = ρπc²/4 (2-D, span infinito); il BEM 3D con immersione
+  parziale (5 cm sotto z=0) e superficie libera è coerente entro ~15 %.
+
+10.4  Proiezione modi beam → mesh
+─────────────────────────────────
+  Frazione |d·n̂|/|d| al picco faccia (guida radiazione):
+
+    modo 1 (bend):    0.93
+    modo 2 (torsion): 0.95
+    modo 3:           0.94
+    modo 4:           0.94
+
+  PNG debug: .../validation/debug_mode_projection_mode_*.png
+  Il mapping non sopprime la velocità normale. Edge-stretch sezione rigida
+  su mesh curva: fino a ~0.35 sui modi 3–4 (approssimazione nota).
+
+10.5  Plateau A_∞, B_∞ (ω ∈ [0.1, 60] rad/s, ω_cut ≈ 53 rad/s)
+───────────────────────────────────────────────────────────────
+  A_∞ diagonale [kg]:  [0.198, 1.994, 0.374, 0.363]
+  B_∞ diagonale [kg/s]: ≈ 0 (acqua profonda / ω alta)
+  Variazione relativa A nella coda: < 0.01 % per tutti i modi → plateau OK
+  A_∞ definita positiva (autovalori: 0.059, 0.078, 0.450, 2.341 kg)
+
+  Stima freq. bagnate (diag): [9.65, 11.93, 37.33, 59.84] Hz
+  (dry: [10.56, 20.64, 43.75, 69.84] Hz)
+
+10.6  water_depth e fondale — perché 2 m non cambia nulla
+─────────────────────────────────────────────────────────
+  Config attuale: free_surface=0, depth=0.0508 m, water_depth=2 m
+    → fondale a z = −2.0 m
+
+  Mesh dopo traslazione immersione: z ∈ [−0.813, −0.051] m
+    → distanza fondale–estremità inferiore ala ≈ 1.19 m
+
+  Il corpo è nella zona superficiale; il fondale a −2 m è troppo lontano per
+  influenzare il campo radiativo. Confronto numerico Sway @ ω=60 rad/s:
+
+    water_depth = inf:  A = 44.568 kg
+    water_depth = 2 m:  A = 44.570 kg   (Δ < 0.01 %)
+
+  Effetti del fondale compaiono solo se water_depth ≲ 0.9 m (fondale vicino
+  all’estremità inferiore della mesh). Per modellare la galleria Abramson
+  (tunnel chiuso, non canale aperto) servirebbe un approccio diverso: pareti
+  laterali / confinamento, non solo fondale lontano.
+
+  NOTA: l’esperimento Abramson è in galleria chiusa completamente immersa;
+  B(ω) radiativo → 0 in open-channel non descrive lo smorzamento di tunnel.
+  Nel flutter solver si usa empirical_fluid_damping (es. abramson_delta) per
+  la parte non coperta dal BEM potenziale.
+
+10.7  Checklist prima dell’uso in produzione (RFA_PK / flutter)
+──────────────────────────────────────────────────────────────
+  [ ] validate_added_mass_benchmarks.py — Tier 1 PASS + Heave consistency PASS
+  [ ] compare_added_mass_projection.py — rigid_body NPZ aggiornato con modale
+  [ ] plot_capytaine_hydro_validation.py — plateau A(ω), PNG proiezione modi
+  [ ] Verificare water_depth: effetto nullo se fondale >> distanza corpo–fondo
+  [ ] Se ω_flutter cade vicino a ω_cut: preferire pk_capytaine_matrices=True
+
+================================================================================
+  FINE DOCUMENTO
+================================================================================

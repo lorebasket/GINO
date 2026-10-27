@@ -1,8 +1,67 @@
 import time
 import csv
+import argparse
 
 
-def main(start_time=None):
+_CAERO1_ATTRS = (
+    'caero_x1', 'caero_y1', 'caero_z1',
+    'caero_x4', 'caero_y4', 'caero_z4',
+)
+
+
+def _caero1_from_config(cfg):
+    """Read flat-panel CAERO1 corners and card IDs from config_<case>.py."""
+    missing = [a for a in _CAERO1_ATTRS if not hasattr(cfg, a)]
+    if missing:
+        raise AttributeError(
+            f"Case '{cfg.name}': add to config_{cfg.name}.py: {', '.join(missing)}"
+        )
+    return {
+        'x1': float(cfg.caero_x1),
+        'y1': float(cfg.caero_y1),
+        'z1': float(cfg.caero_z1),
+        'x4': float(cfg.caero_x4),
+        'y4': float(cfg.caero_y4),
+        'z4': float(cfg.caero_z4),
+        'chord_root': float(cfg.chord_root),
+        'chord_tip': float(getattr(cfg, 'chord_tip', cfg.chord_root)),
+        'caero_id': int(getattr(cfg, 'caero_id', 1)),
+        'pid': int(getattr(cfg, 'caero_pid', 1)),
+        'igid': int(getattr(cfg, 'caero_igid', 1)),
+    }
+
+
+def _apply_run_config(cfg):
+    """Map AnalysisConfig fields to executer run parameters."""
+    import numpy as np
+
+    c_sound = getattr(cfg, 'c_sound', {'air': 332.5, 'water': 1484.0})
+    fluid = cfg.fluid
+    nspan = [int(cfg.nspan)]
+    nchord = int(cfg.nchord)
+    aspect_ratio = nchord / nspan[0]
+    attack_angle = [float(cfg.alpha_deg)]
+    k_list = np.asarray(getattr(cfg, 'k_list', np.linspace(0.001, 50, 100)), dtype=float)
+    V_list = np.asarray(cfg.V_list, dtype=float)
+    Ma_list = V_list / c_sound[fluid]
+    dlm_method = getattr(cfg, 'dlm_method', 'quartic')
+    return {
+        'blade_name': getattr(cfg, 'blade_name', cfg.name),
+        'fluid': fluid,
+        'nspan': nspan,
+        'AR': [aspect_ratio],
+        'attack_angle': attack_angle,
+        'alpha_r': np.deg2rad(attack_angle[0]),
+        'k_list': k_list,
+        'V_list': V_list,
+        'Ma_list': Ma_list,
+        'DLM_method': dlm_method,
+        'c_sound': c_sound,
+        'analysis_config': cfg,
+    }
+
+
+def main(start_time=None, case_name=None, dry_run=False):
 
     import sys
     import os
@@ -32,29 +91,31 @@ def main(start_time=None):
     from scipy.interpolate import interp1d
     from COUPLING.hydroelastic_utl.post_processing import plot_aero_beam_model
 
-    # --- AEROGRID SETUP --- #
-    blade_name = 'ABRAMSON1965' # 'hollowell', 'wing01', 'GOLAND'
-    fluid = 'water'
-    nspan = [30] # number of spanwise panels
-    AR = [0.5]  # aspect ratio
+    if not case_name:
+        raise ValueError(
+            "Pass --case <name> (e.g. NACA0015_POM). "
+            "CAERO1 corners and sweep are read from examples/<case>/config_<case>.py."
+        )
+
+    from examples.config import get_config
+    analysis_config = get_config(case_name)
+    run = _apply_run_config(analysis_config)
+    blade_name = run['blade_name']
+    fluid = run['fluid']
+    nspan = run['nspan']
+    AR = run['AR']
+    attack_angle = run['attack_angle']
+    alpha_r = run['alpha_r']
+    k_list = run['k_list']
+    V_list = run['V_list']
+    Ma_list = run['Ma_list']
+    DLM_method = run['DLM_method']
+    c_sound = run['c_sound']
+    print(f"Loaded run parameters from examples/{case_name}/config_{case_name}.py")
+
     DLM = True
     VLM = False
-    # Choose DLM integration method: 'parabolic' (Rodden 1971/72) or 'quartic' (Rodden 1998)
-    # Set to 'quartic' to use the quartic integration approximation.
-    DLM_method = 'quartic'
-
-    plot = True
-
-    # angle of attack
-    attack_angle = [0.0] #[0, 10] # °grad
-    alpha_r = np.deg2rad(attack_angle[0]) # angle of attack in radians
-    
-    c_sound = {'air': 332.5, 'water':1484.0} # speed of sound of air at 2000m altitude
-
-    # --- LIST  --- #
-    k_list = np.round(np.concatenate([np.linspace(0.001, 1, 10), np.linspace(1, 4, 10), np.linspace(4, 60, 90)]), 3)
-    V_list = np.linspace(1, 30, 30)
-    Ma_list = V_list / c_sound[fluid]
+    plot = not dry_run
         
     # ===== Method ===== #
     # 1 for CAERO1 flat panel, 2 for curve-based grid builder
@@ -79,116 +140,20 @@ def main(start_time=None):
             print(f"     chordwise panels: {n_chord_count}")
 
             if method == 1:
-                
-                if blade_name == 'GOLAND':
-                    # GOLAND wing configuration
-                    chord_root = 1.8288; chord_tip = 1.8288
-                    span = 6.096  # m
-                    beam_length = span
-                    sh_offset = 0.0 # as a fraction of chord, e.g. 0.25 for quarter-chord, 0.5 for mid-chord
-                
-                    # CAERO1 card points
-                    caero_id = 1; pid = 1; igid = 1
-                
-                    # Elastic axis reference (at 0.33*chord from LE)
-                    x1 = -sh_offset * chord_root; x4 = -sh_offset * chord_tip
-                    y1 = -0; y4 = beam_length
-                    z1 = 0; z4 = 0
-                
-                elif blade_name == 'hollowell':
-                    # Hollowell configuration
-                    chord_root = 0.076; chord_tip = 0.076
-                    span = 0.305  # m
-                    beam_length = span
-                
-                    # CAERO1 card points
-                    caero_id = 1; pid = 1; igid = 1
-                
-                    # Center the aerogrid: LE at -chord/2, TE at +chord/2
-                    # This matches SONATA's centered airfoil definition
-                    x1 = -0.038; x4 = -0.038  # LE at -chord/2 = -0.076/2
-                    y1 = 0; y4 = beam_length
-                    z1 = 0; z4 = 0
 
-                elif blade_name == 'BAH144B':
-                    # Hollowell configuration
-                    chord_root = 0.052592; chord_tip = 0.052592
-                    span = 0.1403374314  # m
-                    beam_length = span
-                
-                    # CAERO1 card points
-                    caero_id = 1; pid = 1; igid = 1
-                
-                    # Center the aerogrid: LE at -chord/2, TE at +chord/2
-                    # This matches SONATA's centered airfoil definition
-                    x1 = 0; x4 = +0.037603  # LE at -chord/2 = -0.076/2
-                    y1 = 0; y4 = beam_length
-                    z1 = 0; z4 = 0
+                geo = _caero1_from_config(analysis_config)
+                chord_root = geo['chord_root']
+                chord_tip = geo['chord_tip']
+                caero_id = geo['caero_id']
+                pid = geo['pid']
+                igid = geo['igid']
+                x1 = geo['x1']
+                y1 = geo['y1']
+                z1 = geo['z1']
+                x4 = geo['x4']
+                y4 = geo['y4']
+                z4 = geo['z4']
 
-                elif blade_name == '1x1grid':
-                    # Hollowell configuration
-                    chord_root = 1; chord_tip = 1
-                    span = 1  # m
-                    beam_length = span
-                
-                    # CAERO1 card points
-                    caero_id = 1; pid = 1; igid = 1
-                
-                    # Center the aerogrid: LE at -chord/2, TE at +chord/2
-                    # This matches SONATA's centered airfoil definition
-                    x1 = -0.5; x4 = -0.5  # LE at -chord/2 = -0.076/2
-                    y1 = 0; y4 = beam_length
-                    z1 = 0; z4 = 0
-
-                elif blade_name == 'grid_conv':
-                    # Hollowell configuration
-                    chord_root = 0.5; chord_tip = 0.5
-                    span = 3  # m
-                    beam_length = span
-                
-                    # CAERO1 card points
-                    caero_id = 1; pid = 1; igid = 1
-                
-                    # Center the aerogrid: LE at -chord/2, TE at +chord/2
-                    # This matches SONATA's centered airfoil definition
-                    x1 = 0; x4 = 0  # LE at -chord/2 = -0.076/2
-                    y1 = 0; y4 = beam_length
-                    z1 = 0; z4 = 0
-                
-                elif blade_name == 'NACA0003':
-                    # NACA0003 airfoil configuration
-                    chord_root = 0.095; chord_tip = 0.095
-                    span = 0.15  # m
-                    beam_length = span
-                
-                    # CAERO1 card points
-                    caero_id = 1; pid = 1; igid = 1
-                
-                    x1 = 0.0; x4 = 0.0
-                    y1 = 0; y4 = beam_length
-                    z1 = 0; z4 = 0
-
-                if blade_name == 'ABRAMSON1965':
-                    # GOLAND wing configuration
-                    chord_root = 0.3048; chord_tip = 0.3048
-                    span = 0.762  # m
-                    beam_length = span
-                    xc_offset = 0.512 # as a fraction of chord, e.g. 0.25 for quarter-chord, 0.5 for mid-chord
-                
-                    # CAERO1 card points
-                    caero_id = 1; pid = 1; igid = 1
-                
-                    # Elastic axis reference (at 0.33*chord from LE)
-                    x1 = -xc_offset * chord_root; x4 = -xc_offset * chord_tip
-                    y1 = 0.0; y4 = 0.0
-                    z1 = -beam_length; z4 = 0.0
-
-                    plot = True
-
-
-                else:
-                    raise ValueError(f"Unknown blade_name: {blade_name}")       
-                
                 study_case = f"{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}"
                 output_dir = FSI_path + '/FLUID/PanelAero/Qjj/CAERO1_cards'
                 wing = output_dir + '/' + study_case + '.CAERO1' # Read CAERO1 card
@@ -355,6 +320,10 @@ def main(start_time=None):
     print(f"  Total Qjj computations: {len(aerogrid_dict) * len(k_list) * len(Ma_list)}")
     print(f"{'='*60}\n")
 
+    if dry_run:
+        print("Dry run: aerogrid built; skipping Qjj precomputation.")
+        return
+
     output_dir = Path("qjj_precomputed")
     output_dir.mkdir(exist_ok=True)
 
@@ -363,7 +332,7 @@ def main(start_time=None):
         print(f"Saving aerogrid at path: {output_dir}")
         
         out_dir = FSI_path + f"/FLUID/PanelAero/Qjj/qjj_precomputed/{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_{DLM_method}"
-        out_dir_vlm = FSI_path + f"/FLUID/PanelAero/Qjj/qjj_precomputed/vjj_{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_klist_{DLM_method}"
+        out_dir_vlm = FSI_path + f"/FLUID/PanelAero/Qjj/qjj_precomputed/vjj_{blade_name}_{fluid}_alpha{attack_angle[0]}_nspan{n_span}_nchord{n_chord_count}_{DLM_method}"
         
         print(f"Precomputing Qjj for n_span={n_span}, n_chord={n_chord_count}")
         # ensure output directory exists (precompute may expect it)
@@ -613,11 +582,25 @@ def play_completion_sound():
 
 
 if __name__ == "__main__":
-    #from precompute_qjj import precompute_qjj_grid, check_existing_qjj_files
-    #check_existing_qjj_files("/media/lorenzo/Seagate Por/recupero dati Linux/lorebasket/FSI/PanelAero/Qjj/qjj_precomputed/GOLAND_air_alpha2_nspan50_nchord30_klist_new")
+    parser = argparse.ArgumentParser(
+        description="Precompute PanelAero Qjj; load geometry and sweep from examples/config.py via --case.",
+    )
+    parser.add_argument(
+        '--case_name',
+        dest='case_name',
+        required=True,
+        help="Case name (e.g. NACA0015_POM) — loads examples/<case>/config_<case>.py",
+    )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help="Build aerogrid and CAERO1 only; skip Qjj precomputation",
+    )
+    args = parser.parse_args()
+
     start_time = time.time()
     try:
-        main(start_time=start_time)
+        main(start_time=start_time, case_name=args.case_name, dry_run=args.dry_run)
     finally:
         play_completion_sound()
         end_time = time.time()

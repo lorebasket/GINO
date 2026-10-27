@@ -1,7 +1,14 @@
 import numpy as np
 import pandas as pd
 
-def create_beam_model(K, M, n_el, sections_props_csv=None, center_beam=False, chord=None):
+def create_beam_model(
+    K,
+    M,
+    n_el,
+    sections_props_csv=None,
+    *,
+    beam_axis_x_offset: float = 0.0,
+):
 
     n_nodes = n_el + 1
 
@@ -98,14 +105,8 @@ def create_beam_model(K, M, n_el, sections_props_csv=None, center_beam=False, ch
         # cg_global[1] is the Y component in SONATA coords (chordwise in local frame)
         x_chordwise = cg_global[1] - y_offset
         
-        # If center_beam is True, offset the beam chordwise to center it around X=0
-        # SONATA places beam reference line at LE (X=0 to X=chord)
-        # To center: shift by -chord/2 so LE is at -chord/2 and TE at +chord/2
-        if center_beam:
-            if chord is None:
-                raise ValueError("chord must be provided when center_beam=True")
-            x_chordwise -= chord / 2.0
-            
+        x_chordwise += float(beam_axis_x_offset)
+
         nodes.append({
             "position": [x_chordwise, cg_global[0], cg_global[2]],
             "index": i,

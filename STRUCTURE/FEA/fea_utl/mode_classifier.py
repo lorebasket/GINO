@@ -39,19 +39,94 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # DOF GROUP DEFINITIONS
 # ---------------------------------------------------------------------------
-# For a 6-DOF beam node the physical interpretation is:
+# For a 6-DOF beam node with span (axial) direction ALONG GLOBAL X the physical
+# interpretation is:
 #   Axial      : ux        (index 0 within the node's 6 DOFs)
 #   Bending XY : uy + θz   (indices 1, 5)
 #   Bending XZ : uz + θy   (indices 2, 4)
 #   Torsion    : θx        (index 3)
+#
+# The beam is generally NOT built/oriented along X: the default build convention
+# is span along +Y, and post-build rotations (e.g. dihedral_angle=-90° about +X)
+# put the span along Z (config.beam_span_axis). Because the eigenvectors are
+# expressed in the GLOBAL frame, the axial DOF, the torsion DOF and the two
+# bending planes rotate with the beam. `build_dof_groups(span_axis)` regenerates
+# the mapping for any global span axis so the classification follows the beam
+# instead of assuming span ∥ X.
 
-DOF_GROUPS = {
-    "Axial":       [0],
-    "Bending XY":  [1, 5],
-    "Bending XZ":  [2, 4],
-    "Torsion":     [3],
-}
+AXIS_NAMES = {0: "X", 1: "Y", 2: "Z"}
 
+
+def detect_span_axis(node_coords: np.ndarray) -> int:
+    """
+    Infer the global axis (0=X, 1=Y, 2=Z) the beam span runs along from the node
+    coordinates: the span is the axis of largest geometric extent.
+
+    This reads the span from the SAME frame the eigenvectors were computed in
+    (both come from the structural beam_model), so it is self-consistent even
+    when config.beam_span_axis refers to a different, downstream frame (e.g. a
+    post-build dihedral applied only to the aero grid / coupling). A moderate
+    planform sweep does not change the dominant axis, so this stays correct for
+    swept beams too.
+    """
+    P = np.asarray(node_coords, dtype=float)
+    if P.ndim != 2 or P.shape[1] != 3 or P.shape[0] < 2:
+        raise ValueError(f"node_coords must be (n_nodes, 3); got {P.shape}")
+    extent = P.max(axis=0) - P.min(axis=0)
+    return int(np.argmax(extent))
+
+
+def build_dof_groups(span_axis: int = 1) -> dict:
+    """
+    Build the {group_name: [local_dof_indices]} mapping for a 3D beam whose span
+    (axial) direction is the global axis ``span_axis`` (0=X, 1=Y, 2=Z).
+
+    Local DOF order per node: [ux, uy, uz, θx, θy, θz].
+      - Axial   : translation along the span axis                (span_axis)
+      - Torsion : rotation about the span axis                   (3 + span_axis)
+      - Bending : each transverse translation paired with the rotation about the
+                  *other* transverse axis — that is the curvature that bends the
+                  beam in the plane containing the span and the translation.
+
+    For ``span_axis=0`` this reproduces the legacy X-span groups exactly:
+      Axial=[0], Bending XY=[1,5], Bending XZ=[2,4], Torsion=[3].
+    """
+    if span_axis not in (0, 1, 2):
+        raise ValueError(f"span_axis must be 0, 1 or 2, got {span_axis!r}")
+
+    t1, t2 = (i for i in (0, 1, 2) if i != span_axis)
+
+    def bend_name(t: int) -> str:
+        a, b = sorted((t, span_axis))
+        return f"Bending {AXIS_NAMES[a]}{AXIS_NAMES[b]}"
+
+    return {
+        "Axial":       [span_axis],
+        bend_name(t1): [t1, 3 + t2],
+        bend_name(t2): [t2, 3 + t1],
+        "Torsion":     [3 + span_axis],
+    }
+
+
+# Legacy default (span ∥ X) kept for backward-compatible imports.
+DOF_GROUPS = build_dof_groups(span_axis=0)
+
+
+def group_color_map(groups) -> dict:
+    """
+    Assign a stable color per group by role (Axial / 1st bending / 2nd bending /
+    Torsion), regardless of the concrete plane names produced for a given span
+    axis. Coupled/unknown labels fall back to the "Mixed" color.
+    """
+    role_palette = ["#4C72B0", "#DD8452", "#55A868", "#C44E52"]
+    names = list(groups)
+    colors = {name: role_palette[i % len(role_palette)]
+              for i, name in enumerate(names)}
+    colors["Mixed"] = "#9370DB"
+    return colors
+
+
+# Legacy default color map (span ∥ X names).
 GROUP_COLORS = {
     "Axial":      "#4C72B0",
     "Bending XY": "#DD8452",
@@ -67,7 +142,8 @@ NDOF_PER_NODE = 6   # standard 3D beam element
 # HELPER FUNCTIONS
 # ---------------------------------------------------------------------------
 
-def _participation_ratios(phi: np.ndarray, n_nodes: int) -> dict:
+def _participation_ratios(phi: np.ndarray, n_nodes: int,
+                          groups: dict = None) -> dict:
     """
     Given a single eigenvector phi (length = n_nodes * 6),
     returns a dict {group_name: ratio} where ratio ∈ [0, 1]
@@ -75,13 +151,18 @@ def _participation_ratios(phi: np.ndarray, n_nodes: int) -> dict:
 
     The metric used is the squared L2 norm of each DOF-group's
     components, normalised by the total squared L2 norm.
+
+    ``groups`` is the {name: [local_dof_indices]} mapping (see
+    ``build_dof_groups``); defaults to the legacy span ∥ X groups.
     """
+    if groups is None:
+        groups = DOF_GROUPS
     phi = np.asarray(phi, dtype=float)
     phi = phi / (np.linalg.norm(phi) + 1e-300)   # unit normalise
     energy_total = np.dot(phi, phi)               # = 1.0 after normalisation
 
     ratios = {}
-    for group, local_indices in DOF_GROUPS.items():
+    for group, local_indices in groups.items():
         # Gather global indices for this group across ALL nodes
         global_idx = []
         for node in range(n_nodes):
@@ -140,6 +221,23 @@ class ModeClassifier:
         Number of structural nodes in the model.
     freq_type    : str
         One of 'lambda' | 'omega' | 'hz'.
+    node_coords  : ndarray, shape (n_nodes, 3), optional
+        Undeformed nodal XYZ. If given and ``span_axis is None`` the span axis is
+        auto-detected from the geometry (axis of largest extent) — this is the
+        recommended path, since it reads the span from the same frame as the
+        eigenvectors. Also reused by ``plot_mode_shape``.
+    span_axis    : int or None
+        Global axis the beam span (axial direction) is aligned with
+        (0=X, 1=Y, 2=Z). The eigenvectors are in the global frame, so this
+        controls which DOFs are treated as axial, torsion and the two bending
+        planes. If None, auto-detect from ``node_coords`` (falling back to 1,
+        the +Y build convention, if no coords are supplied). Do NOT pass
+        ``config.beam_span_axis`` here: that describes a downstream (post-
+        dihedral) aero frame, which may differ from the frame the dry structural
+        modes were solved in. NOTE: an integer axis resolves axis-aligned
+        orientations; an in-plane sweep tilts the span slightly and is not
+        resolved by an integer axis (the residual coupling shown is mostly
+        physical for moderate sweep).
     threshold_dominant  : float
         Participation ratio above which a group is considered "dominant".
     threshold_secondary : float
@@ -152,6 +250,8 @@ class ModeClassifier:
         eigenvalues:  np.ndarray,
         n_nodes:      int,
         freq_type:    str   = "lambda",
+        node_coords:  np.ndarray = None,
+        span_axis:    int   = None,
         threshold_dominant:  float = 0.50,
         threshold_secondary: float = 0.10,
     ):
@@ -159,6 +259,22 @@ class ModeClassifier:
         self.lam   = np.asarray(eigenvalues,  dtype=float)
         self.n_nodes = n_nodes
         self.freq_type = freq_type.lower()
+        self.node_coords = (np.asarray(node_coords, dtype=float)
+                            if node_coords is not None else None)
+
+        if span_axis is not None:
+            self.span_axis = int(span_axis)
+        elif self.node_coords is not None:
+            self.span_axis = detect_span_axis(self.node_coords)
+        else:
+            warnings.warn(
+                "No span_axis and no node_coords supplied — assuming span ∥ +Y "
+                "(index 1). Pass node_coords to auto-detect the span axis."
+            )
+            self.span_axis = 1
+
+        self.groups = build_dof_groups(self.span_axis)
+        self.group_colors = group_color_map(self.groups)
         self.thr_dom = threshold_dominant
         self.thr_sec = threshold_secondary
 
@@ -201,7 +317,7 @@ class ModeClassifier:
         results = []
         for i in range(n_modes):
             phi = self.Phi[:, i]
-            ratios = _participation_ratios(phi, self.n_nodes)
+            ratios = _participation_ratios(phi, self.n_nodes, self.groups)
             label  = _classify_mode(ratios, self.thr_dom, self.thr_sec)
             record = {
                 "Mode":       i + 1,
@@ -223,10 +339,12 @@ class ModeClassifier:
 
         print("\n" + "=" * 78)
         print("  CURVED BEAM – VIBRATION MODE CLASSIFICATION")
+        print(f"  span axis = {AXIS_NAMES[self.span_axis]} (global index "
+              f"{self.span_axis})")
         print("=" * 78)
 
-        cols = ["Mode", "f [Hz]", "ω [rad/s]", "Nature",
-                "Axial", "Bending XY", "Bending XZ", "Torsion"]
+        group_names = list(self.groups)
+        cols = ["Mode", "f [Hz]", "ω [rad/s]", "Nature"] + group_names
 
         if HAS_PANDAS:
             rows = [{c: r[c] for c in cols} for r in self._results]
@@ -236,18 +354,18 @@ class ModeClassifier:
             print(df.to_string(index=False))
         else:
             # Fallback plain-text table
-            fmt_header = "{:>5}  {:>12}  {:>12}  {:>20}  {:>7}  {:>10}  {:>10}  {:>8}"
-            fmt_row    = "{:>5}  {:>12}  {:>12}  {:>20}  {:>7}  {:>10}  {:>10}  {:>8}"
-            print(fmt_header.format(*cols))
+            fmt_head_fixed = "{:>5}  {:>12}  {:>12}  {:>20}"
+            grp_cell = "  {:>12}"
+            print(fmt_head_fixed.format("Mode", "f [Hz]", "ω [rad/s]", "Nature")
+                  + "".join(grp_cell.format(g) for g in group_names))
             print("-" * 78)
             for r in self._results:
-                print(fmt_row.format(
+                print(fmt_head_fixed.format(
                     r["Mode"],
                     f"{r['f [Hz]']:.{n_decimals}f}",
                     f"{r['ω [rad/s]']:.{n_decimals}f}",
                     r["Nature"],
-                    r["Axial"], r["Bending XY"], r["Bending XZ"], r["Torsion"],
-                ))
+                ) + "".join(grp_cell.format(r[g]) for g in group_names))
 
         print("=" * 78)
         print(f"  Thresholds: dominant≥{self.thr_dom*100:.0f}%  "
@@ -264,7 +382,7 @@ class ModeClassifier:
 
         results = self._results[:max_modes]
         n = len(results)
-        groups = list(DOF_GROUPS.keys())
+        groups = list(self.groups.keys())
 
         matrix = np.array([[r["_ratios"][g] for g in groups] for r in results])
         labels = [f"#{r['Mode']}\n{r['f [Hz]']:.2f} Hz\n{r['Nature']}"
@@ -276,7 +394,7 @@ class ModeClassifier:
 
         for gi, g in enumerate(groups):
             bars = ax.bar(x, matrix[:, gi], bottom=bottom,
-                          color=GROUP_COLORS[g], label=g, edgecolor="white", linewidth=0.5)
+                          color=self.group_colors[g], label=g, edgecolor="white", linewidth=0.5)
             # annotate bars with percentage if large enough
             for bi, (b, val) in enumerate(zip(bottom, matrix[:, gi])):
                 if val > 0.08:
@@ -290,7 +408,7 @@ class ModeClassifier:
         ax.set_xticklabels(labels, fontsize=8)
         for tick, r in zip(ax.get_xticklabels(), results):
             nature = r["Nature"]
-            color = GROUP_COLORS.get(nature, GROUP_COLORS["Mixed"])
+            color = self.group_colors.get(nature, self.group_colors["Mixed"])
             tick.set_color(color)
 
         ax.set_ylabel("Participation Ratio")
@@ -324,6 +442,9 @@ class ModeClassifier:
         """
         if self._results is None:
             self.classify()
+
+        if node_coords is None:
+            node_coords = self.node_coords
 
         if node_coords is None:
             warnings.warn("No node_coords supplied – using default unit-arc geometry.")
@@ -472,6 +593,7 @@ def run_demo():
         eigenvalues  = lambdas,
         n_nodes      = n_nodes,
         freq_type    = "lambda",
+        span_axis    = 0,   # demo mode shapes are built with span ∥ X
         threshold_dominant  = 0.50,
         threshold_secondary = 0.10,
     )

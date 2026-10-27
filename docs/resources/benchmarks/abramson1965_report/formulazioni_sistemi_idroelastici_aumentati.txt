@@ -1,0 +1,199 @@
+FORMULAZIONI — SISTEMI IDRO-AEROELASTICI (CORREZIONE IDROELASTICA)
+================================================================================
+Data: 4 giugno 2026
+Contesto: benchmark Abramson1965 e setup FSI generale
+
+Questo documento riassume le formulazioni usate nel codice quando:
+  • metodo PK  con  added_mass_strip_theory = True
+  • metodo RFA con  rfa_apply_b2_mass = False   (correzione idroelastica: AM esterna in M_hat, Roger senza B2)
+
+In entrambi i casi la massa aggiunta idrodinamica “strutturale” (strip theory) entra in M_hat
+prima del coupling aero; l’inerzia non stazionaria del GAF DLM non viene duplicata tramite B2.
+
+
+0. NOTAZIONE E RIDUZIONE MODALE
+--------------------------------
+Coordinate modali (Nm modi tracciati):
+  q, q_dot  — spostamento e velocità generalizzate
+
+Matrici ridotte (proiezione Φ sui modi secchi ordinati per frequenza):
+  M_hat, C_hat, K_hat
+
+Fluido:
+  ρ     = rho_f[fluid]
+  q_dyn = ½ ρ V²
+
+Frequenza ridotta (PK) e circolare:
+  k     = ω / V        (iterata fino a convergenza nel PK)
+  ω     = k V
+
+Coefficienti aerodinamici modali da DLM / PanelAero:
+  Q_modal(k)  — matrice Nm×Nm complessa, funzione di k (e, nel PK, del percorso iterativo)
+
+Scala opzionale sulla parte immaginaria (smorzamento aero non stazionario):
+  s_Q = aero_im_Q_scale   (default 1; il fit Roger usa Q non scalato, la scala agisce in assemblaggio)
+
+
+1. MASSA AGGIUNTA STRIP (added_mass_strip_theory = True)
+---------------------------------------------------------
+Prima dell’analisi flutter, in structural_analysis:
+
+  (a) Massa aggiunta 2-D per unità di lunghezza (cilindro / lamina sottile):
+        m_a' = ρ π c² / 4
+
+  (b) Lump ai nodi FEA sulle DOF trasversali al tratto (asse di tratto
+      strip_theory_span_axis, default 1 per beam lungo +Y):
+        m_nodo = ½ m_a' Δy     su ciascuna DOF trasversale del nodo
+
+  (c) Matrice globale M_added_strip (NDOF × NDOF), eventuale congruenza
+      dihedral se dihedral_rotate_beam=True
+
+  (d) Proiezione modale sui modi secchi Φ:
+        M_hat_added = Φᵀ M_cant_added_strip Φ
+
+  (e) Aggiornamento delle matrici ridotte:
+        M_hat ← M_hat_struct + M_hat_added
+        C_hat ← C_hat_struct + C_hat_added     (oggi C_hat_added = 0 se factor=0)
+
+Le frequenze “a fluido fermo” e gli autovettori usati nel coupling DLM
+sono ricalcolati da (M_hat, C_hat, K_hat) dopo l’aggiunta strip.
+
+Convenzione: la strip NON entra nel fit Roger come B2; con RFA+strip si usa
+rfa_apply_b2_mass=False per evitare doppio conteggio dell’inerzia.
+
+
+2. METODO P–K  (pk_method, added_mass_strip_theory = True)
+-----------------------------------------------------------
+Il PK non introduce stati di lag Roger: sistema in forma compagna 2Nm.
+
+2.1 Matrici effettive a ogni iterazione (k, V)
+  Q(k) valutato da Qjj precomputate + coupling Z, Z_qs, Z_force (DLM modale).
+
+  Con scaling solo su Im(Q) per lo smorzamento:
+        Q_damp = Re(Q) + j s_Q Im(Q)
+
+  Contributi aerodinamici (aero_system.Ac, forma canonica):
+        K_aero = q_dyn · Re(Q_damp)
+        C_aero = (q_dyn / k) · Im(Q_damp) = ½ ρ V · Im(Q_damp)   [se k≠0]
+
+  Struttura + strip già in M_hat; nessun termine −½ρ B2:
+        M_eff = M_hat
+        K_eff = K_hat − K_aero
+        C_eff = C_hat − C_aero + C_emp
+
+  C_emp = smorzamento empirico modale (es. abramson_delta) se abilitato;
+          dipende da V e, opzionalmente, da ω_ref = kV.
+
+2.2 Equazioni del moto modali
+        M_eff q̈ + C_eff q̇ + K_eff q = 0
+
+2.3 Spazio di stato (compagno)
+        X_PK = [ q ; q̇ ]     (dimensione 2 Nm)
+
+        Ẋ_PK = A_PK X_PK
+
+        A_PK = |  0      I  |
+               | −M_eff⁻¹K_eff  −M_eff⁻¹C_eff |
+
+2.4 Criterio flutter PK
+  Per ogni velocità V si itera k fino a convergenza del modo (MAC, predizione, …).
+  Autovalore p del sistema “bagnato” associato al modo:
+        g = Re(p) / |Im(p)|   (adimensionale se dimensionless_vgvf_results)
+        f = |Im(p)| / (2π)
+  Instabilità: g → 0⁺.
+
+
+3. METODO RFA (Roger)  (roger_fit, rfa_apply_b2_mass = False)
+---------------------------------------------------------------
+Approssimazione di Q_modal(k) con poli di lag β_i = blag[i] (es. 0.5, 1, … in unità k).
+
+3.1 Fit LSQ (include_b2 = False)
+  Per ogni elemento (i,j) di Q_modal, su griglia k_list:
+
+  Parte reale — base:  [ 1,  k²/(k²+β²) per ogni lag ]
+  Parte immaginaria — base:  [ k,  kβ/(k²+β²) per ogni lag ]
+
+  Coefficienti: B0, B1, Blag[l];  B2 ≡ 0 (non è grado di libertà del fit).
+
+  Ricostruzione:
+        Q_fit(k) = B0 + j k B1 + Σ_l  Blag[l] · (k² + j k β_l) / (k² + β_l²)
+
+  Nota: la parte Re(Q) ~ −k² (inerzia nel GAF) non è assegnata a B2; resta sui lag
+  o nel residuo del LSQ — coerente con AM strip già in M_hat.
+
+3.2 Matrici effettive a velocità V (strip in M_hat, senza B2 DLM)
+        M_eff = M_hat                    (+ M_hydro_add se ramo Capytaine attivo)
+        K_eff = K_hat − ½ ρ V² B0
+        C_eff = C_hat − s_Q · ½ ρ V B1 + C_hydro_add + C_emp
+
+  Nel ramo RFA+strip tipico Abramson: M_hydro_add = 0, C_hydro_add = 0
+  (solo strip in M_hat; Capytaine opzionale in altro ramo).
+
+3.3 Equazioni del moto con stati di lag
+  N = numero poli di lag;  xa_i ∈ ℝ^Nm.
+
+        M_eff q̈ = −K_eff q − C_eff q̇ + Σ_i  s_lag · q_dyn · Blag[i] · xa_i
+
+        ẋa_i = q̇ − V · β_i · xa_i
+
+  con  s_lag = aero_im_Q_scale  se aero_im_Q_scale_lags=True, altrimenti 1.
+
+3.4 Sistema aumentato (spazio di stato)
+        X_RFA = [ q ; q̇ ; xa_1 ; … ; xa_N ]     (dimensione (2+N) Nm)
+
+        Ẋ_RFA = A_aug X_RFA
+
+  Blocchi di A_aug (flutter_solver._build_A_aug):
+        [0,1]     = I
+        [1,0]     = −M_eff⁻¹ K_eff
+        [1,1]     = −M_eff⁻¹ C_eff
+        [1,2+i]   =  M_eff⁻¹ · (s_lag · q_dyn · Blag[i])
+        [2+i,1]   = I
+        [2+i,2+i] = −V β_i I
+
+3.5 Criterio flutter RFA
+  A ogni V si calcolano autovalori di A_aug (senza iterazione PK su k).
+  Modo instabile: Re(λ) > 0; frequenza da Im(λ).
+
+
+4. CONFRONTO SINTETICO PK+strip vs RFA+strip
+---------------------------------------------
+| Grandezza   | PK + strip                    | RFA + strip (b2 off)        |
+|-------------|-------------------------------|-----------------------------|
+| M_eff       | M_hat (strip inclusa)         | M_hat (strip inclusa)       |
+| Inerzia GAF | via Re(Q(k)) in K_aero        | non in B2; lag / residuo Re |
+| Smorz. aero | −½ρV·Im(Q), scala s_Q in PK  | −s_Q·½ρV·B1                 |
+| Rigidezza   | −q_dyn·Re(Q)                  | −½ρV²·B0                    |
+| Stati extra | no (2Nm)                      | N stati di lag (2+N)Nm      |
+| k           | iterato (p–k)                 | implicito nei poli Roger    |
+
+Entrambi condividono lo stesso M_hat strutturale+strip e lo stesso DLM per Q(k);
+il report Abramson valida l’accordo V–g / V–f tra PK+strip e RFA+strip con s_Q=1.
+
+
+5. RAMO OPZIONALE — RFA + Capytaine (non è lo strip, ma stessa convenzione b2)
+-------------------------------------------------------------------------------
+Se si usa il ramo idroelastico con asymptotic BEM invece della sola strip:
+
+        M_eff = M_hat + A_∞(ω)     (interpolato a ω = ω_modo)
+        C_eff = C_hat − s_Q·½ρV·B1 + B_∞(ω) + C_emp
+
+Anche qui: rfa_apply_b2_mass=False per non sommare B2 DLM ad A_∞.
+
+
+6. PARAMETRI CONFIG RILEVANTI
+------------------------------
+  added_mass_strip_theory = True   → sezione 1, poi PK o RFA
+  rfa_apply_b2_mass       = False  → sezione 3 (fit e assemblaggio senza B2)
+  aero_im_Q_scale         → s_Q su C_aero (PK) o B1 (RFA)
+  aero_im_Q_scale_lags    → scala anche forze di lag Roger
+  empirical_fluid_*       → C_emp in entrambi i metodi se attivo
+
+File codice:
+  STRUCTURE/FEA/structural_analysis.py   — strip, M_hat_added
+  COUPLING/hydroelastic_utl/aero_system.py — PK Ac
+  COUPLING/flutter_solver.py             — Roger fit, _build_A_aug, sweep RFA
+  COUPLING/hydroelastic_utl/aero_q_scaling.py — s_Q
+
+================================================================================
+Fine documento.

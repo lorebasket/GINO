@@ -1,0 +1,20 @@
+{
+  "plot": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/output_data/GOLAND/framework_comparison/uvlm_basis_diag/goland_tippoor_twist_vgvf.png",
+  "summary": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/output_data/GOLAND/framework_comparison/uvlm_basis_diag/goland_tippoor_twist_vgvf.csv",
+  "bend_g_delta": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/output_data/GOLAND/framework_comparison/uvlm_basis_diag/goland_tippoor_twist_bend_g_delta.csv",
+  "V_f": {
+    "sharpy": 163.76736555165633,
+    "gino_baseline": 162.28312757201647,
+    "gino_tippoor": 147.01940820871778,
+    "gino_sharpy_basis": 163.8126776577601,
+    "gino_dlm_sharpy_basis": 190.21238095238095
+  },
+  "f_f": {
+    "sharpy": 11.249662830264352,
+    "gino_baseline": 11.212703943770121,
+    "gino_tippoor": 11.924134464525821,
+    "gino_sharpy_basis": 11.26005091483319,
+    "gino_dlm_sharpy_basis": 12.147119708068203
+  },
+  "note": "Red: mode-1 Ry patch only. Green: UVLM + exact SHARPy M\u0302/K\u0302/Q. Orange: DLM aero on GINO panels with exact SHARPy M\u0302/K\u0302 (NPZ) and SHARPy [W,TH] shapes used only for the panel projection."
+}

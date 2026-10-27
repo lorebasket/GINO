@@ -1,0 +1,401 @@
+% Compile from the FSI repository root:
+%   bash docs/resources/benchmarks/Model2_bluntbased_report/build_report.sh
+% Or:
+%   pdflatex -output-directory docs/resources/benchmarks/Model2_bluntbased_report/build \
+%     docs/resources/benchmarks/Model2_bluntbased_report/model2_bluntbased_current_report.tex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\pgfplotsset{every axis/.append style={grid=both, grid style={gray!20}, tick align=outside}}
+
+% Resolve asset paths from repo root OR from this report folder.
+\makeatletter
+\newcommand{\fsiroot}{}
+\newcommand{\fsipath}[1]{\fsiroot#1}
+\newcommand{\reportpath}[1]{figures/#1}
+\IfFileExists{figures/mode_shapes_alpha0.png}{%
+  % compile from report folder
+}{%
+  \IfFileExists{docs/resources/benchmarks/Model2_bluntbased_report/figures/mode_shapes_alpha0.png}{%
+    \renewcommand{\reportpath}[1]{docs/resources/benchmarks/Model2_bluntbased_report/figures/#1}%
+  }{%
+    \IfFileExists{../../../../docs/resources/benchmarks/Model2_bluntbased_report/figures/mode_shapes_alpha0.png}{%
+      \renewcommand{\reportpath}[1]{../../../../docs/resources/benchmarks/Model2_bluntbased_report/figures/#1}%
+    }{}%
+  }%
+}
+\IfFileExists{output_data/Model2-bluntbased/Model2-bluntbased_dry_egv_eigendata.csv}{%
+  \def\fsiroot{}%
+}{%
+  \IfFileExists{../../../../output_data/Model2-bluntbased/Model2-bluntbased_dry_egv_eigendata.csv}{%
+    \def\fsiroot{../../../../}%
+  }{%
+    \PackageWarning{model2_bluntbased}{Cannot locate FSI repo root; figures/CSV may be missing.}%
+  }%
+}
+\makeatother
+
+\geometry{margin=24mm}
+\sisetup{detect-all=true, per-mode=symbol}
+
+\title{Stato attuale della replica numerica del Modello~2 (strut blunt-based)}
+\author{Report tecnico di lavoro --- \texttt{Model2-bluntbased}}
+\date{27 maggio 2026 --- allineato a \texttt{config\_Model2-bluntbased.py} e log \texttt{20260527\_105737}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Questo report documenta lo stato corrente della replica del \textbf{Modello~2} (strut con
+trailing edge smussato) del benchmark sperimentale di Bash e Liu,
+\emph{Bending Flutter and Torsional Flutter of Flexible Hydrofoil Struts}.
+Documenta gli \textbf{input attivi} in \texttt{config\_Model2-bluntbased.py}, l'analisi
+modale a secco, la massa aggiunta strip a fluido fermo, l'accoppiamento PanelAero
+(\texttt{nspan=20}, \texttt{nchord=10}, quartic) e un primo sweep Roger RFA
+(\texttt{V\_list}, 50 velocita'). I risultati numerici citati provengono dal log
+\texttt{flutter\_analysis\_Model2-bluntbased\_20260527\_105737.log}, salvo il riepilogo
+flutter da \texttt{output\_data/flutter\_summary.csv} (run precedente completata).
+Confronto con curve Bash \& Liu: da fare.
+\end{abstract}
+
+\section{Riferimento sperimentale}
+
+Il documento di riferimento descrive quattro modelli di strutture flessibili
+(Modello~1--4) con diverso rapporto di massa e geometria di corda. Il \textbf{Modello~2}
+e' la variante con \emph{blunt trailing edge} (sezione A-A del disegno di costruzione:
+circonferenze al leading edge, facce piatte al trailing edge, $t/c \approx 1/30$).
+Nel setup sperimentale la strut e' immersa, con sweep di \SI{15}{\degree} e campata
+nominalmente di \SI{49.963}{in} (\SI{1.269}{\meter}) e corda \SI{11.59}{in}
+(\SI{0.294}{\meter}).
+
+In questa fase del lavoro numerico si replica \textbf{soltanto la strut} (nessun piano
+di portanza aggiuntivo): beam cantilever con sezione definita in
+\texttt{config\_Model2-bluntbased.py}, accoppiata a una superficie DLM equivalente
+costruita in \texttt{FLUID/PanelAero/Qjj/executer.py}.
+
+\section{Configurazione numerica}
+
+La configurazione attiva e' in
+\texttt{examples/Model2-bluntbased/config\_Model2-bluntbased.py}.
+I default globali (\texttt{examples/config.py}) impongono \texttt{n\_elements=200},
+\texttt{num\_modes\_egv=4}, fluido acqua, \texttt{nspan=20}, \texttt{nchord=10}.
+
+\subsection{Geometria e materiali}
+
+\begin{table}[H]
+  \centering
+  \caption{Parametri principali della configurazione \texttt{Model2-bluntbased}.}
+  \label{tab:config}
+  \begin{tabular}{lll}
+    \toprule
+    Grandezza & Valore config & Nota \\
+    \midrule
+    Campata $L$ & $49.963\times0.0254 = \SI{1.269}{\meter}$ & \texttt{beam\_length}, non proiettata \\
+    Corda $c$ & $5.796\times2\times0.0254 = \SI{0.294}{\meter}$ & \texttt{chord}, 12\,inches nominali \\
+    $t/c$ & $1/30$ & \texttt{thickness\_factor=0.033} \\
+    Sweep $\Lambda$ & \SI{15}{\degree} & \texttt{sweep\_angle\_deg} \\
+    Tip mesh (SC) & $(x,y,z)\approx(\SI{0.340}{\meter},\SI{1.269}{\meter},0)$ & $x=L\tan\Lambda$; \texttt{...\_nodes.csv} \\
+    $\mu$ (lineare) & \SI{18.8}{\kilogram\per\meter} & \texttt{mu} \\
+    $EI_{xx}$, $GJ$ & \SI{3710.91}, \SI{5940.9}{\newton\meter\squared} & flessione / torsione \\
+    $EA$, $EI_{zz}$, $GA_x$, $GA_z$ & $\times 1000$ rispetto a $EI_{xx}$/$GJ$ & rigidezze assiali/scherro moltiplicate \\
+    $I_\alpha$ & \SI{0.16812}{lbf.in.s$^2$} & MOI totale su EA (strut + tip) \\
+    $k_{i22}$, $k_{i33}$ & 0.3, 0.7 & inerzie rotazionali secondarie \\
+    $x_{SC}/c$, $x_{CM}/c$ & 0.31, 0.417 & \texttt{xea\_factor}, \texttt{xcm\_factor} \\
+    Offset $e$ (sezione $M$) & \SI{0.0304}{\meter} & log: da SC a CG lungo corda \\
+    Dihedral & \SI{-90}{\degree} & solo trave (\texttt{dihedral\_rotate\_aerogrid=False}) \\
+    $\zeta$ Rayleigh & 0.5\% (2 modi) & \texttt{rayleigh\_target\_zetas} \\
+    Elementi FEA & 200 & default \texttt{examples/config.py} \\
+    Modi EGV / flutter & 4 / 4 & \texttt{num\_modes\_egv}, \texttt{num\_modes\_flutter\_egv} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Geometria della trave nel codice}
+
+I nodi sono su \texttt{beam\_reference\_node\_positions} (\texttt{beam\_geometry.py}):
+campata lungo \textbf{+Y}, sweep $x(y)=y\tan\Lambda$, radice SC in $(0,0,0)$.
+L'ultima mesh esportata ha $y_\mathrm{tip}=L$ e $x_\mathrm{tip}\approx L\tan15^\circ$
+(coerente con \texttt{beam\_length} fisico nel config).
+\texttt{xea\_factor}/\texttt{xcm\_factor} definiscono la sezione $6\times6$ e il
+coupling PanelAero (\texttt{xea\_factor=0.31} sui corner della griglia), non lo
+spostamento dei nodi trave.
+Nel modello custom (\texttt{structural\_model.py}) gli offset in $M$ usano
+$c/\cos\Lambda$; il log riporta $x_{SC}=\SI{0.088}{\meter}$, $x_{CM}=\SI{0.119}{\meter}$,
+$e=\SI{0.0304}{\meter}$.
+La strip theory usa $c$ dal config e passo $\Delta y=L/n_\mathrm{el}$.
+
+\subsection{Orientamento del modello}
+
+Dopo la rotazione di dihedral \SI{-90}{\degree} sulla sola trave, la campata operativa
+nel sistema ruotato e' lungo l'asse \texttt{beam\_span\_axis=2} (asse $Z$ del riferimento
+post-rotazione). L'analisi modale e le forme modali sono quindi visualizzate con
+ascissa \emph{lunghezza d'arco lungo la trave} (coerente con la Figura delle mode
+shapes a $\alpha=0^\circ$).
+
+\section{Griglia aerodinamica (PanelAero / DLM)}
+
+L'analisi accoppiata carica la griglia pre-calcolata indicata nel config:
+\begin{center}
+\small
+\texttt{qjj\_precomputed/Model2-bluntbased\_water\_alpha0.0\_nspan20\_nchord10\_quartic/aerogrid.npz}
+\end{center}
+(200 pannelli, metodo \texttt{quartic}, $\alpha=0^\circ$, acqua).
+Parametri allineati al config: \texttt{nspan=20}, \texttt{nchord=10},
+\texttt{xea\_factor=0.31} per l'asse elastico sui corner DLM.
+
+Il blocco \texttt{executer.py} per \texttt{Model2-bluntbased} (pre-calcolo \texttt{Qjj}
+manuale) usa ancora geometria \emph{proiettata} e risoluzione \texttt{22$\times$11}:
+campata $L\cos15^\circ$, corda $c/\cos15^\circ$. Va aggiornato per coerenza con il config
+prima di rigenerare le \texttt{Qjj}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{\reportpath{aerogrid_beam_alpha0.png}}
+  \caption{Griglia aerodinamica DLM sovrapposta alla trave (centro di taglio e baricentro).
+  Punti di forza al \SI{25}{\percent} della corda, punti di controllo al \SI{75}{\percent}
+  (convenzione PanelAero). Vista generata da \texttt{executer.py} con
+  \texttt{plot\_aero\_beam\_model}.}
+  \label{fig:aerobeam}
+\end{figure}
+
+Statistiche accoppiamento (log 27/05): distanza media spline trave--pannello
+\SI{0.090}{\meter}, max \SI{0.202}{\meter}; 200 CP / 200 punti di forza.
+
+\section{Analisi modale a secco}
+
+\subsection{Modello FEA e vincoli}
+
+\begin{itemize}
+  \item Trave a \texttt{n\_elements = 200} elementi;
+  \item Primi \texttt{num\_modes\_egv = 4} modi elastici;
+  \item Nodo radice: tutti e 6 i DOF vincolati (\texttt{Constrained DOFs: [0..5]});
+  \item Matrici ridotte: $M,K$ di dimensione $(1200\times1200)$ dopo eliminazione vincoli.
+\end{itemize}
+
+I risultati completi sono in
+\texttt{output\_data/Model2-bluntbased/}:
+\texttt{Model2-bluntbased\_dry\_egv\_eigendata.csv},
+\texttt{...\_nodes.csv}, \texttt{...\_constrained\_dofs.csv}.
+
+\subsection{Frequenze proprie a secco}
+
+\begin{table}[H]
+  \centering
+  \caption{Frequenze proprie a secco (analisi statica / eigenvalue).}
+  \label{tab:dry-freq}
+  \begin{tabular}{ccc}
+    \toprule
+    Modo & $f_\mathrm{dry}$ [Hz] & Commento qualitativo \\
+    \midrule
+    1 & 4.586 & prevalenza $w$ e $\phi_x$ \\
+    2 & 27.936 & flessione/torsione accoppiata \\
+    3 & 40.486 & contributo marcato $\phi_y$ \\
+    4 & 75.200 & modo superiore, forma oscillante in $w$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Forme modali}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{\reportpath{mode_shapes_alpha0.png}}
+  \caption{Forme modali normalizzate ($\alpha = 0^\circ$): spostamenti $u,v,w$ e rotazioni
+  $\phi_x,\phi_y,\phi_z$ lungo la campata. I DOF $u$, $v$ e $\phi_z$ sono trascurabili
+  ($\sim 10^{-9}$--$10^{-10}$); la dinamica e' dominata da $w$, $\phi_x$ e $\phi_y$.}
+  \label{fig:modes}
+\end{figure}
+
+\section{Massa aggiunta strip e frequenze a fluido fermo}
+
+Dopo la riduzione modale, il codice aggiunge la massa aggiunta strip (cilindro
+equivalente, $\rho = \SI{997}{\kilogram\per\meter\cubed}$) sui DOF trasversali
+e risolve il sistema ridotto con smorzamento (state-space a $V=0$).
+
+Con corda fisica $c\approx\SI{0.294}{\meter}$, la strip theory fornisce
+$m_a'=\rho\pi c^2/4 \approx \SI{67.88}{\kilogram\per\meter}$
+(vs.\ $\mu=\SI{18.8}{\kilogram\per\meter}$ strutturale; integrale lump
+$m_a' L \approx \SI{86}{\kilogram}$ su $L\approx\SI{1.269}{\meter}$).
+La versione precedente con corda proiettata $c/\cos15^\circ$ dava erroneamente
+$m_a'\approx\SI{72.5}{\kilogram\per\meter}$.
+
+Dal log \texttt{flutter\_analysis\_Model2-bluntbased\_20260527\_105737.log}:
+\begin{itemize}
+  \item $m_a' = \SI{67.8843}{\kilogram\per\meter}$,
+    passo lump $\Delta y = L/n_\mathrm{el} \approx \SI{6.35e-3}{\meter}$,
+    $\approx \SI{0.215}{\kilogram}$ per DOF trasversale per nodo;
+  \item \texttt{strip\_theory\_span\_axis=1};
+  \item \texttt{dihedral\_deg=-90} impostato ma \textbf{non} applicato a $M_\mathrm{added}$
+    (proiezione modale con autovettori dry nel telaio di riferimento);
+  \item $\|M_\mathrm{add}\|_F \approx 4.31$, $\| \hat{M}_\mathrm{added}\|_F \approx 3.00$.
+\end{itemize}
+
+\subsection{Frequenze a fluido fermo}
+
+\begin{table}[H]
+  \centering
+  \caption{Confronto frequenze dry vs.\ sistema a fluido fermo con strip theory.}
+  \label{tab:wet-freq}
+  \begin{tabular}{cccc}
+    \toprule
+    Modo & $f_\mathrm{dry}$ [Hz] & $f_\mathrm{fluid\ rest}$ [Hz] & $\Delta f / f_\mathrm{dry}$ \\
+    \midrule
+    1 & 4.586 & 2.767 & $-40\%$ \\
+    2 & 27.936 & 17.156 & $-39\%$ \\
+    3 & 40.486 & 38.717 & $-4\%$ \\
+    4 & 75.200 & 47.484 & $-37\%$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \caption{Massa aggiunta strip generalizzata diagonale $\hat{M}_{\mathrm{added},ii}$.}
+  \label{tab:madd}
+  \begin{tabular}{cc}
+    \toprule
+    Modo & $\hat{M}_{\mathrm{added},ii}$ [kg] \\
+    \midrule
+    1 & 1.746 \\
+    2 & 1.631 \\
+    3 & 0.276 \\
+    4 & 1.509 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+I valori sono salvati in
+\texttt{model2\_bluntbased\_frequencies.csv} e
+\texttt{model2\_bluntbased\_strip\_added\_mass.csv} in questa cartella.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      ybar,
+      bar width=14pt,
+      width=0.88\linewidth,
+      height=0.52\linewidth,
+      xlabel={Numero modo},
+      ylabel={Frequenza [Hz]},
+      ymin=0, ymax=82,
+      symbolic x coords={1,2,3,4},
+      xtick=data,
+      enlarge x limits=0.18,
+      legend style={font=\small, at={(0.98,0.98)}, anchor=north east},
+      grid=both,
+      grid style={gray!20},
+      tick align=outside
+    ]
+      \addplot[fill=blue!55, draw=blue!80!black] coordinates {
+        (1,4.586) (2,27.936) (3,40.486) (4,75.200)
+      };
+      \addlegendentry{Dry}
+      \addplot[fill=red!55, draw=red!80!black] coordinates {
+        (1,2.767) (2,17.156) (3,38.717) (4,47.484)
+      };
+      \addlegendentry{Fluido fermo (strip)}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Confronto a barre delle frequenze proprie dry e a fluido fermo (strip theory)
+  per ciascun modo.}
+\end{figure}
+
+\section{Primo sweep flutter (Roger RFA)}
+
+Config: \texttt{V\_list = linspace(0.5, 45, 50)} m/s, \texttt{n\_lag=4},
+\texttt{blag = [0.5, 1.0, 1.5, 2.0]} (adimensionali, convertiti in $1$/m nel solver),
+\texttt{empirical\_fluid\_damping=True}, modello \texttt{abramson\_delta} con
+$\Delta\delta = \SI{5}{\per\second}$, \texttt{aero\_im\_Q\_scale=1.0}.
+
+Riepilogo da \texttt{output\_data/flutter\_summary.csv} (analisi completata, 26 maggio;
+da rivalutare dopo allineamento definitivo DLM--struttura):
+
+\begin{table}[H]
+  \centering
+  \caption{Velocita' di flutter stimate per branch modale (primo attraversamento $g=0$).}
+  \label{tab:flutter}
+  \begin{tabular}{cccc}
+    \toprule
+    Branch & $V_f$ [m/s] & $V_f$ [kn] & $f_f$ [Hz] \\
+    \midrule
+    1 & --- & --- & --- \\
+    2 & 14.86 & 28.88 & 41.24 \\
+    3 & 14.61 & 28.41 & 39.17 \\
+    4 & 10.56 & 20.52 & 67.06 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Il branch~4 ha la velocita' critica minima ($\approx\SI{10.6}{\meter\per\second}$).
+Il branch~1 non mostra attraversamento nel riepilogo.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{\reportpath{vg_vf_combined.png}}
+  \caption{Diagrammi V--$g$ e V--$f$ dal run con \texttt{flutter\_summary.csv} (26 maggio).}
+  \label{fig:vgvf}
+\end{figure}
+
+\section{Pipeline idro-aeroelastica (stato lavori)}
+
+\begin{table}[H]
+  \centering
+  \caption{Stato dei componenti per il benchmark Model2.}
+  \begin{tabular}{lll}
+    \toprule
+    Componente & Stato & File / nota \\
+    \midrule
+    Config struttura + sezione blunt & OK & \texttt{config\_Model2-bluntbased.py} \\
+    EGV dry + export CSV & OK & \texttt{output\_data/Model2-bluntbased/} \\
+    Mode shapes / aerobeam plot & OK & Fig.\ \ref{fig:modes}, \ref{fig:aerobeam} \\
+    Strip $M_\mathrm{added}$ + freq.\ fluid rest & OK & Tab.\ \ref{tab:wet-freq}, log 27/05 \\
+    \texttt{Qjj} usate in analisi & OK & \texttt{nspan20\_nchord10\_quartic} \\
+    \texttt{executer.py} CAERO1 Model2 & Da allineare & ancora $L\cos\Lambda$, \texttt{22$\times$11} \\
+    Mesh Capytaine & Presente & \texttt{FLUID/capytaine/Model2-bluntbased/} \\
+    Sweep flutter Roger RFA & Parziale & Tab.\ \ref{tab:flutter}; rigenerare con geom.\ finale \\
+    Confronto Bash \& Liu & Da fare & digitazione curve \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Altri parametri dal config:
+\begin{itemize}
+  \item Capytaine: \texttt{omega\_list} 0.1--150 rad/s (300 punti),
+    mesh \texttt{30$\times$30}, \texttt{results\_modal\_radiation/};
+  \item sezione blunt: contorno normalizzato \texttt{raw} (41 punti, TE piatto);
+  \item plot: \texttt{dimensionless\_vgvf\_results}, contributi $K$/$C$, partecipanti DLM.
+\end{itemize}
+
+\section{Conclusione e prossimi passi}
+
+Config e analisi strutturale sono allineati su $L=\SI{1.269}{\meter}$,
+$c=\SI{0.294}{\meter}$, $\mu=\SI{18.8}{\kilogram\per\meter}$,
+$m_a'=\SI{67.88}{\kilogram\per\meter}$. Le \texttt{Qjj} in uso
+(\texttt{20$\times$10}) seguono il config; \texttt{executer.py} per rigenerarle no.
+Un primo flutter numerico indica $V_f\approx\SI{10.6}{\meter\per\second}$ (branch~4),
+da ricalcolare dopo allineamento DLM.
+
+\textbf{Prossimi passi:}
+\begin{enumerate}
+  \item Aggiornare \texttt{executer.py} (geom.\ fisica, \texttt{20$\times$10}) e rigenerare \texttt{Qjj}.
+  \item Completare sweep $V$--$g$--$f$ con la geometria finale e confrontare Bash \& Liu.
+  \item Digitare curve sperimentali in CSV (stile report Abramson).
+  \item Opzionale: applicare dihedral a $M_\mathrm{added}$ strip.
+\end{enumerate}
+
+\end{document}

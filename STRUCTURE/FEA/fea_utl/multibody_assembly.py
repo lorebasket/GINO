@@ -165,25 +165,198 @@ def rotation_matrix_from_to(v_from, v_to):
     return c * np.eye(3) + s * K_skew + (1 - c) * np.outer(axis, axis)
 
 
-def T6_from_beam_direction(beam_direction_global):
+def section_rotation_matrix(
+    beam_direction_global,
+    chord_direction_global,
+    thickness_direction_global=None,
+):
     """
-    Build the 6×6 transformation matrix T that maps DOFs from the local beam
-    frame into the global frame.
+    Orthonormal section basis in global coordinates (before dihedral / α rotations).
 
-    Parameters
-    ----------
-    beam_direction_global : array_like (3,)
-        Unit vector of the beam axis in the global frame.
+    Columns of ``R`` are local unit vectors ``[u, v, w]`` expressed in global axes:
+      - **v** : shear / elastic axis (beam axis, spanwise along the member)
+      - **u** : chordwise (from ``chord_direction_global``, made ⊥ v)
+      - **w** : thickness (``u × v``, or from ``thickness_direction_global`` if given)
 
-    Returns
-    -------
-    T : np.ndarray (6,6)
+    Section ``K`` / ``M`` at build use DOF order ``[u, v, w, θx, θy, θz]`` with this basis.
     """
-    R = rotation_matrix_from_to(np.array([0.0, 1.0, 0.0]), beam_direction_global)
+    v_dir = np.asarray(beam_direction_global, dtype=float)
+    v_dir /= np.linalg.norm(v_dir)
+
+    chord = np.asarray(chord_direction_global, dtype=float)
+    cn = np.linalg.norm(chord)
+    if cn < 1e-14:
+        raise ValueError("chord_direction_global must be non-zero")
+    chord /= cn
+
+    u_dir = chord - np.dot(chord, v_dir) * v_dir
+    un = np.linalg.norm(u_dir)
+    if un < 1e-10:
+        raise ValueError(
+            "chord_direction_global is parallel to the beam axis; "
+            "cannot build a chord–span–thickness triad"
+        )
+    u_dir /= un
+
+    if thickness_direction_global is None:
+        w_dir = np.cross(u_dir, v_dir)
+    else:
+        thick = np.asarray(thickness_direction_global, dtype=float)
+        thick /= np.linalg.norm(thick)
+        w_dir = thick - np.dot(thick, v_dir) * v_dir - np.dot(thick, u_dir) * u_dir
+        wn = np.linalg.norm(w_dir)
+        if wn < 1e-10:
+            w_dir = np.cross(u_dir, v_dir)
+        else:
+            w_dir /= wn
+
+    wn = np.linalg.norm(w_dir)
+    if wn < 1e-10:
+        raise ValueError("degenerate section basis (u, v, w)")
+    w_dir /= wn
+
+    return np.column_stack([u_dir, v_dir, w_dir])
+
+
+def T6_from_section_rotation(R: np.ndarray) -> np.ndarray:
+    """6×6 frame map from ``section_rotation_matrix`` (local → global)."""
+    R = np.asarray(R, dtype=float)
     T = np.zeros((6, 6), dtype=float)
     T[:3, :3] = R
     T[3:, 3:] = R
     return T
+
+
+def T6_from_beam_direction(beam_direction_global):
+    """
+    Build T using only the beam-axis direction (legacy / multibody links).
+
+    Prefer ``T6_from_beam_and_chord`` when planform sweep fixes chord ⊥ span in space.
+    """
+    R = rotation_matrix_from_to(np.array([0.0, 1.0, 0.0]), beam_direction_global)
+    return T6_from_section_rotation(R)
+
+
+def T6_from_beam_and_chord(
+    beam_direction_global,
+    chord_direction_global,
+    thickness_direction_global=None,
+):
+    """
+    Section map with explicit chord / thickness references (swept-wing builds).
+
+    Locks **u** to the chord reference and **v** to the member direction so ``EIxx``,
+    ``EIzz``, ``GJ`` stay in the intended physical directions under planform sweep.
+    """
+    R = section_rotation_matrix(
+        beam_direction_global,
+        chord_direction_global,
+        thickness_direction_global,
+    )
+    return T6_from_section_rotation(R)
+
+
+def orient_element_section_global_reference(
+    element: dict,
+    K_loc: np.ndarray,
+    M_loc: np.ndarray,
+) -> None:
+    """
+    Map sectional ``K_loc``, ``M_loc`` with local axes fixed to global reference:
+
+    **u** = +X (chord), **v** = +Y (span), **w** = +Z (thickness).
+
+    Use when section properties are defined in the horizontal span frame rather
+    than rotated to follow a swept elastic axis. Beam nodes may still follow
+    planform sweep; element length remains the physical member length.
+    """
+    T6 = np.eye(6, dtype=float)
+    K_loc = np.asarray(K_loc, dtype=float)
+    M_loc = np.asarray(M_loc, dtype=float)
+    element["section_stiffness_local"] = K_loc.copy()
+    element["section_mass_local"] = M_loc.copy()
+    element["stiffness"] = K_loc.copy()
+    element["mass"] = M_loc.copy()
+    element["T6"] = T6
+    element["beam_dir_global"] = [0.0, 1.0, 0.0]
+    element["chord_dir_global"] = [1.0, 0.0, 0.0]
+    element["thickness_dir_global"] = [0.0, 0.0, 1.0]
+
+
+def orient_element_section_from_local(
+    element: dict,
+    p1,
+    p2,
+    K_loc: np.ndarray,
+    M_loc: np.ndarray,
+    *,
+    chord_direction_global=None,
+    thickness_direction_global=None,
+) -> np.ndarray:
+    """
+    Map sectional ``K_loc``, ``M_loc`` (local u=chord, v=beam, w=thickness) into global DOFs.
+
+    When ``chord_direction_global`` is given, **v** follows ``p2 - p1`` and **u** is built
+    from the chord reference (Gram–Schmidt), which preserves sweep / DLM chord alignment.
+    Otherwise falls back to aligning only local +Y with the member (legacy).
+
+    Stores ``section_stiffness_local`` / ``section_mass_local``, global ``stiffness`` /
+    ``mass``, and ``T6`` / ``beam_dir_global`` on *element* (in place).
+
+    Global assembly uses ``C_local = T6.T @ stiffness @ T6``, which recovers ``K_loc``.
+    """
+    p1 = np.asarray(p1, dtype=float)
+    p2 = np.asarray(p2, dtype=float)
+    d = p2 - p1
+    length = float(np.linalg.norm(d))
+    if length < 1e-14:
+        raise ValueError(
+            f"Beam element {element.get('nodes')} has zero length; cannot orient section."
+        )
+    beam_dir = d / length
+    if chord_direction_global is not None:
+        T6 = T6_from_beam_and_chord(
+            beam_dir,
+            chord_direction_global,
+            thickness_direction_global,
+        )
+        R = T6[:3, :3]
+        element["chord_dir_global"] = R[:, 0].tolist()
+        element["thickness_dir_global"] = R[:, 2].tolist()
+    else:
+        T6 = T6_from_beam_direction(beam_dir)
+    K_loc = np.asarray(K_loc, dtype=float)
+    M_loc = np.asarray(M_loc, dtype=float)
+    element["section_stiffness_local"] = K_loc.copy()
+    element["section_mass_local"] = M_loc.copy()
+    element["stiffness"] = T6 @ K_loc @ T6.T
+    element["mass"] = T6 @ M_loc @ T6.T
+    element["T6"] = T6.copy()
+    element["beam_dir_global"] = beam_dir.tolist()
+    if chord_direction_global is None:
+        element.pop("chord_dir_global", None)
+        element.pop("thickness_dir_global", None)
+    return beam_dir
+
+
+def compose_T6_on_beam_model(beam_model, T6_delta: np.ndarray) -> None:
+    """
+    Left-multiply each element's ``T6`` by ``T6_delta`` (rigid frame change in global space).
+
+    Updates stored global ``stiffness`` / ``mass`` from the unchanged local sections.
+    """
+    T6_delta = np.asarray(T6_delta, dtype=float)
+    R = T6_delta[:3, :3]
+    for elem in beam_model.get("elements", []):
+        if "section_stiffness_local" not in elem:
+            continue
+        K_loc = np.asarray(elem["section_stiffness_local"], dtype=float)
+        M_loc = np.asarray(elem["section_mass_local"], dtype=float)
+        T6 = T6_delta @ np.asarray(elem["T6"], dtype=float)
+        elem["T6"] = T6
+        elem["stiffness"] = T6 @ K_loc @ T6.T
+        elem["mass"] = T6 @ M_loc @ T6.T
+        elem["beam_dir_global"] = (R @ np.asarray(elem["beam_dir_global"], dtype=float)).tolist()
 
 
 def T6_for_element(element, nodes):

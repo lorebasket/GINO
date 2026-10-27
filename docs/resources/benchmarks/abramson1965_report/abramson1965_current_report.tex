@@ -1,7 +1,7 @@
 % Compile from the FSI repository root:
 %   pdflatex -output-directory docs/resources/benchmarks/abramson1965_report/build \
 %     docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.tex
-% LaTeX Workshop: see .vscode/settings.json (also compiles from repo root).
+% Or: docs/resources/benchmarks/abramson1965_report/build_report.sh
 \documentclass[11pt,a4paper]{article}
 
 \usepackage[utf8]{inputenc}
@@ -21,14 +21,13 @@
 \pgfplotsset{compat=1.18}
 \pgfplotsset{every axis/.append style={grid=both, grid style={gray!20}, tick align=outside}}
 
-% Resolve asset paths from repo root OR from this report folder (LaTeX Workshop).
 \makeatletter
 \newcommand{\fsiroot}{}
 \newcommand{\fsipath}[1]{\fsiroot#1}
-\IfFileExists{output_data/vg_lambda_vf_combined.png}{%
+\IfFileExists{output_data/ABRAMSON1965/vlambda_data.csv}{%
   \def\fsiroot{}%
 }{%
-  \IfFileExists{../../../../output_data/vg_lambda_vf_combined.png}{%
+  \IfFileExists{../../../../output_data/ABRAMSON1965/vlambda_data.csv}{%
     \def\fsiroot{../../../../}%
   }{%
     \PackageWarning{abramson1965}{Cannot locate FSI repo root; figures/CSV may be missing.}%
@@ -42,29 +41,36 @@
 \DeclareSIUnit{\cps}{cps}
 \DeclareSIUnit{\ftunit}{ft}
 
-\title{Stato attuale dell'analisi idro-aeroelastica dell'ala ABRAMSON1965}
+\title{Stato dell'analisi idro-aeroelastica dell'ala ABRAMSON1965}
 \author{Report tecnico di lavoro}
-\date{20 maggio 2026}
+\date{4 giugno 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Questo report riassume lo stato corrente della simulazione numerica del modello di idrofoil
-ABRAMSON1965, confrontando gli input usati nel caso di calcolo con i parametri riportati
-nel lavoro originale di Abramson e Ransleben (1965), \emph{An Experimental Investigation of
-Flutter of a Fully Submerged Subcavitating Hydrofoil}. Il riferimento sperimentale principale
-e' la rottura per flutter a \SI{48.1}{\knunit} con frequenza accoppiata di circa \SI{17.5}{\cps}
-e velocita' ridotta $(V/b\omega)_F=1.48$. La run attuale predice invece il primo
-attraversamento di instabilita' a \SI{6.82}{\meter\per\second}, cioe' \SI{13.3}{\knunit}, sulla seconda branca:
-il risultato e' quindi ancora lontano dal benchmark sperimentale.
+Questo report documenta la simulazione numerica del modello di idrofoil
+ABRAMSON1965, confrontando gli input del caso di calcolo con i parametri del
+lavoro originale di Abramson e Ransleben (1965), \emph{An Experimental Investigation of
+Flutter of a Fully Submerged Subcavitating Hydrofoil}.
+Il riferimento sperimentale e' la rottura per flutter a \SI{48.1}{\knunit} con
+frequenza accoppiata di circa \SI{17.5}{\cps} e $(V/b\omega)_F=1{,}48$.
+La linea di calcolo di riferimento e' \textbf{Roger RFA + DLM} con
+\textbf{massa aggiunta da strip theory} sui primi due modi; il decadimento $\delta$
+[e s$^{-1}$] e' ricavato dagli autovalori bagnati.
+Lo smorzamento strutturale Rayleigh e' fissato a $\zeta=0{,}03$ per coerenza con la
+Figura~5 a bassa velocita'.
+Riducendo \texttt{aero\_im\_Q\_scale} sulle componenti immaginarie di $Q_{jj}$
+il flutter numerico si sposta verso velocita' piu' alte
+(\SI{18.1}{\knunit} con scala 0.5, \SI{31.2}{\knunit} con scala 0.4),
+pur restando sotto il benchmark sperimentale.
 \end{abstract}
 
 \section{Riferimento sperimentale}
 
 Nel documento originale il modello e' un idrofoil completamente immerso, cantilever, con
 sezione NACA 16-012, massa distribuita e rigidezze pensate per rendere il sistema incline
-al flutter. La Tabella 1 del paper riporta i parametri effettivi del modello; le Figure 5 e 6
+al flutter. La Tabella~1 del paper riporta i parametri effettivi del modello; le Figure~5 e 6
 forniscono rispettivamente il fattore di decadimento esponenziale e la frequenza torsionale
 accoppiata in funzione della velocita'. Le tre curve teoriche del paper sono:
 \begin{enumerate}
@@ -72,35 +78,41 @@ accoppiata in funzione della velocita'. Le tre curve teoriche del paper sono:
   \item coefficienti tridimensionali teorici di Reissner--Stevens;
   \item coefficienti tridimensionali misurati.
 \end{enumerate}
+La rottura sperimentale avviene a \SI{48.1}{\knunit} con frequenza accoppiata
+$\approx\SI{17.5}{\cps}$.
 
 \begin{figure}[H]
   \centering
   \begin{subfigure}{0.49\textwidth}
     \centering
     \includegraphics[width=\linewidth]{\fsipath{docs/resources/benchmarks/notes/figure_5_abramson.png}}
-    \caption{Figura 5 originale: fattore di decadimento.}
+    \caption{Figura~5: fattore di decadimento.}
   \end{subfigure}
   \hfill
   \begin{subfigure}{0.39\textwidth}
     \centering
     \includegraphics[width=\linewidth]{\fsipath{docs/resources/benchmarks/notes/figure_6_abramson.png}}
-    \caption{Figura 6 originale: frequenza torsionale accoppiata.}
+    \caption{Figura~6: frequenza torsionale accoppiata.}
   \end{subfigure}
-  \caption{Riferimenti grafici dal paper Abramson e Ransleben (1965).}
+  \caption{Riferimenti grafici dal paper Abramson e Ransleben (1965). Nella Figura~5
+  l'asse $\delta=0$ e' in alto: nel paper i valori stabili positivi compaiono verso il basso
+  ($\delta\approx\SI{4}{\per\second}$ a $V=0$ sulle curve teoriche). Nei grafici numerici
+  si usa la convenzione del codice (radici stabili con $\delta<0$).}
 \end{figure}
 
 \section{Verifica degli input}
 
-La configurazione corrente e' letta da \texttt{examples/ABRAMSON1965/config\_ABRAMSON1965.py}.
+La configurazione e' definita in \texttt{examples/ABRAMSON1965/config\_ABRAMSON1965.py}.
 La tabella seguente confronta i principali valori fisici con quelli del documento originale.
-Le conversioni sono: \SI{1}{\ftunit}=\SI{0.3048}{\meter}, \num{1} lb.in$^2$ = \SI{2.8689e-3}{\newton\meter\squared}.
+Le conversioni sono: \SI{1}{\ftunit}=\SI{0.3048}{\meter},
+\num{1} lb.in$^2$ = \SI{2.8689e-3}{\newton\meter\squared}.
 
 \begin{table}[H]
   \centering
-  \caption{Confronto tra input del paper e configurazione numerica corrente.}
+  \caption{Confronto tra input del paper e configurazione numerica.}
   \begin{tabular}{llll}
     \toprule
-    Grandezza & Abramson 1965, valore effettivo & Config corrente & Nota \\
+    Grandezza & Abramson 1965, valore effettivo & Config & Nota \\
     \midrule
     Semichord $b$ & \SI{0.50}{\ftunit} = \SI{0.1524}{\meter} & $c/2=\SI{0.1524}{\meter}$ & OK \\
     Chord $c$ & \SI{1.0}{\ftunit} = \SI{0.3048}{\meter} & \SI{0.3048}{\meter} & OK \\
@@ -108,60 +120,153 @@ Le conversioni sono: \SI{1}{\ftunit}=\SI{0.3048}{\meter}, \num{1} lb.in$^2$ = \S
     Aspect ratio full-span & 5.0 & $2L/c=5.0$ & OK \\
     Massa per unita' di span & $\approx \SI{72.14}{\kilogram\per\meter}$ & \SI{72.14}{\kilogram\per\meter} & OK \\
     Mass ratio & 0.99 & $\mu/(\pi\rho b^2)\approx0.99$ & OK \\
-    Asse elastico & quarto di corda & $x_{EA}/c=0.25$ & OK \\
-    Centro di massa & $x_\alpha=0.524 of the semichord from the shear center$ & \texttt{xcm\_factor}=0.512 & OK \\
+    Asse elastico & quarto di corda & \texttt{xea\_factor}=0.25 & OK \\
+    Centro di massa & $x_\alpha$ da SC & \texttt{xcm\_factor}=0.512 & OK \\
     $r_\alpha^2$ (inerzia polare) & 0.512 & 0.512 ($I_p=\mu r_\alpha^2 b^2$) & OK \\
     $EI$ & $3.40\cdot10^6$ lb.in$^2$ & \SI{9.76e3}{\newton\meter\squared} & OK \\
     $GJ$ & $0.973\cdot10^6$ lb.in$^2$ & \SI{2.79e3}{\newton\meter\squared} & OK \\
     F. flessionale a secco uncpl & \SI{10.0}{\hertz} & \SI{10.5}{\hertz} & OK \\
     F. torsionale a secco uncpl & \SI{20.5}{\hertz} & \SI{20.6}{\hertz} & OK \\
+    $\zeta_\mathrm{str}$ (Rayleigh, 2 modi) & --- & 0.03 & v.\S\ref{sec:zeta} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
+\section{Selezione dello smorzamento strutturale $\zeta$}
+\label{sec:zeta}
 
-\section{Metodo numerico usato nella run corrente}
+Nel codice lo smorzamento strutturale e' modellato con matrice Rayleigh
+$C=\alpha M+\beta K$, con coefficienti $\alpha$, $\beta$ ricavati da
+\texttt{rayleigh\_target\_zetas} sui modi secchi usati nel flutter
+(\texttt{rayleigh\_mode\_ids} = modi 0 e 1).
+La configurazione usa \texttt{rayleigh\_target\_zetas=(0.03, 0.03)}, cioe'
+$\zeta_1=\zeta_2=3\%$ sui modi di flessione e torsione a secco.
 
-La run piu' recente usa un modello strutturale beam cantilever a 100 elementi, ridotto
+\paragraph{Allineamento con la Figura~5.}
+A $V\to 0$ le curve teoriche del paper partono da
+$\delta\approx\SI{4}{\per\second}$ (in convenzione codice $\delta\approx\SI{-4}{\per\second}$).
+Per il modo torsionale a secco $f_2\approx\SI{20.6}{\hertz}$,
+$\omega_2\approx\SI{129}{\radian\per\second}$:
+\[
+  |\delta| \approx \zeta\,\omega
+  \quad\Rightarrow\quad
+  \zeta_2 \approx \frac{|\delta|}{\omega_2}
+  \approx \frac{4}{129} \approx 0.031.
+\]
+Il valore $\zeta=0{,}03$ e' stato scelto con questo \emph{reverse engineering} per
+replicare l'ordine di grandezza del decadimento a bassa velocita' della Figura~5.
+
+\section{Calcolo di $\delta$ dagli autovalori bagnati}
+\label{sec:delta}
+
+Per ogni velocita' $V$ il solver traccia due rami modali e risolve il problema
+agli autovalori del sistema idro-aeroelastico bagnato. Per ciascun modo
+con autovalore $p=\sigma+\mathrm{j}\omega$ ($\omega=|\mathrm{Im}(p)|$):
+\begin{align}
+  g &= \frac{\sigma}{\omega}
+  \quad\text{(rapporto di smorzamento, convenzione $V$--$g$)}, \\
+  \delta &= g\,\omega = \sigma
+  \quad\text{(fattore di decadimento esponenziale [s$^{-1}$])}, \\
+  \Lambda &= 2\pi\,g = 2\pi\,\frac{\sigma}{\omega}
+  \quad\text{(decremento logaritmico per ciclo).}
+\end{align}
+L'implementazione e' in \texttt{vgvf\_plotting.abramson\_decay\_factor\_from\_storage};
+il pannello $V$--$\delta$ di \texttt{vg\_lambda\_vf\_combined.png} esporta
+\texttt{DecayFactor\_s\_inv\_Branch\_*} in \texttt{vlambda\_data.csv}.
+Il flutter e' individuato al primo attraversamento di $g=0$ (equivalentemente $\delta=0$)
+sul ramo che diventa instabile (tipicamente la branca~2).
+
+\section{Metodo numerico}
+\label{sec:metodo-numerico}
+
+\subsection{Modello strutturale e aerodinamica DLM}
+
+La run di riferimento usa un modello strutturale beam cantilever a 100 elementi, ridotto
 modalmente alle prime due forme. L'inerzia polare torsionale usa $I_p=\mu\,r_\alpha^2\,b^2$
-con $r_\alpha^2=0{,}512$ dalla Tabella~1 (il parametro \texttt{radius\_gyration} nel config).
-L'asse elastico e' al quarto di corda (\texttt{xea\_factor}=0.25) e il baricentro a
-\texttt{xcm\_factor}=0.512. L'aerodinamica non stazionaria e' ottenuta da matrici
-PanelAero/DLM precomputate su griglia \texttt{nspan=18}, \texttt{nchord=9}, metodo
-\texttt{quartic}, fluido acqua e angolo d'attacco nullo.
+con $r_\alpha^2=0{,}512$ dalla Tabella~1. L'asse elastico e' al quarto di corda
+(\texttt{xea\_factor}=0.25) e il baricentro a \texttt{xcm\_factor}=0.512.
+L'aerodinamica non stazionaria e' ottenuta da matrici PanelAero/DLM precomputate su griglia
+\texttt{nspan=32}, \texttt{nchord=16}, metodo \texttt{quartic}, fluido acqua e angolo
+d'attacco nullo.
 
-La soluzione di flutter usa una formulazione Roger RFA con stati di lag e tracking modale
-MAC. Nella run corrente il log riporta quattro poli di lag $[0.5,\,1.0,\,1.5,\,2.0]\ \si{\per\meter}$.
-La correzione idroelastica Capytaine entra come massa aggiunta e smorzamento radiativo
-asintotici costanti:
+\subsection{Soluzione flutter con massa aggiunta strip}
+
+Per entrambi i metodi si usa \texttt{added\_mass\_strip\_theory=True} (massa aggiunta
+proiettata sui modi secchi) e, salvo diversa indicazione,
+\texttt{aero\_im\_Q\_scale}=1.
+Con $\zeta_\mathrm{str}=0{,}03$ le due formulazioni condividono lo stesso modello
+strutturale e le stesse matrici DLM.
+
+\paragraph{Metodo PK.}
+Il metodo $P$--$K$ (\texttt{pk\_method=True}) itera sulla frequenza ridotta $k=\omega/V$
+fino a convergenza del modo tracciato (MAC, predizione del passo precedente).
+Fornisce le curve $V$--$g$ e $V$--$f$ usate come riferimento diretto per la validazione.
+
+\paragraph{Metodo Roger RFA.}
+La formulazione Roger (\texttt{roger\_fit=True}) approssima $Q(k)$ con stati di lag e
+risolve un autovalore del sistema aumentato a ogni velocita' (senza iterazione PK su $k$).
+I poli di lag sono $[0.5,\,1.0,\,1.5,\,2.0]$ ($\beta=k\,b$). Il fit Roger usa $Q(k)$ non
+scalato; \texttt{aero\_im\_Q\_scale} agisce solo su $\mathrm{Im}(Q)$ in $C_\mathrm{eff}$.
+
+\paragraph{Confronto PK+strip vs RFA+strip.}
+Le Figure~\ref{fig:pk-strip} e~\ref{fig:rfa-strip} riportano le stesse grandezze
+($V$--$g$, $V$--$f$; il PK produce anche il pannello $V$--$\delta$ se abilitato nel post-processing)
+con \texttt{aero\_im\_Q\_scale}=1. L'accordo tra i due metodi valida l'implementazione RFA
+rispetto al solver PK sullo stesso caso idro-aeroelastico.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/ABRAMSON_PK-STRIP_vgvf_combined.png}}
+  \caption{Flutter PK + strip theory ($\zeta_\mathrm{str}=0{,}03$,
+  \texttt{aero\_im\_Q\_scale}=1).}
+  \label{fig:pk-strip}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/ABRAMSON_RFA-STRIP_vgvf_combined.png}}
+  \caption{Flutter Roger RFA + strip theory (stessi input del pannello PK:
+  $\zeta_\mathrm{str}=0{,}03$, \texttt{aero\_im\_Q\_scale}=1).}
+  \label{fig:rfa-strip}
+\end{figure}
+
+\subsection{Correzione idroelastica Capytaine (opzionale)}
+
+Oltre alla strip theory, il codice supporta massa aggiunta e smorzamento radiativo
+da Capytaine (BEM) in banda asintotica. La convenzione nel solver e':
 \[
   M_\mathrm{eff} = \hat{M} + A_\infty,
   \qquad
   C_\mathrm{eff} = \hat{C} - s_Q \frac{1}{2}\rho V B_1 + B_\infty + C_\mathrm{emp},
   \qquad
-  K_\mathrm{eff} = \hat{K} - \frac{1}{2}\rho V^2 B_0 .
+  K_\mathrm{eff} = \hat{K} - \frac{1}{2}\rho V^2 B_0 ,
 \]
-Per la profondita' Capytaine selezionata \SI{0.0508}{\meter}, il log riporta
-$A_\infty=\operatorname{diag}(1.3139,\ 0.2771)$ in coordinate modali generalizzate, mentre
-$B_\infty$ e' praticamente nullo nella banda asintotica.
-E' attivo anche uno smorzamento empirico aggiuntivo \texttt{abramson\_delta} con incremento
-$\delta=\SI{5}{\per\second}$, pensato per replicare dissipazioni sperimentali aggiuntive
-(viscosita', free surface, supporti, attriti).
+con $s_Q=\texttt{aero\_im\_Q\_scale}$.
+Per profondita' \SI{0.0508}{\meter} (2\,in sopra la lamina, come in Fig.~1 del paper),
+i valori asintotici tipici sono $A_\infty=\operatorname{diag}(1.31,\,0.28)$\,kg in coordinate
+modali e $B_\infty\approx 0$ nella banda di flutter.
+La run RFA+strip di questo report non sostituisce la strip con Capytaine in $M_\mathrm{eff}$,
+ma le curve BEM restano utili per interpretare i contributi idrodinamici.
 
-\section{Risultati correnti}
+\subsection{Smorzamento empirico}
+
+E' disponibile uno smorzamento empirico aggiuntivo (\texttt{empirical\_fluid\_model=abramson\_delta},
+\texttt{empirical\_fluid\_delta\_add\_s=5.0}\,s$^{-1}$) per modellare dissipazioni non
+catturate dal DLM (viscosita', superficie libera, supporti). Nel confronto diretto con la
+Figura~5 va usato con cautela perche' il paper non separa i contributi.
+
+\section{Risultati numerici: contributi e idrodinamica modale}
+
+Questa sezione riporta i diagrammi di supporto (contributi $M/K/C$, partecipanti DLM,
+massa aggiunta) ottenuti con il solver RFA+strip a \texttt{aero\_im\_Q\_scale}=1.
+Le curve di flutter con scale ridotte di $\mathrm{Im}(Q)$ sono nel
+\S\ref{sec:imq-scale}; il confronto PK vs RFA e' nel \S\ref{sec:metodo-numerico}.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{\fsipath{output_data/vg_lambda_vf_combined.png}}
-  \caption{Curve $V-\Lambda$, $V-g$ e $V-f$ prodotte dalla run corrente. Il solver individua
-  $V_F=\SI{6.82}{\meter\per\second}=\SI{13.3}{\knunit}$ sulla seconda branca ($f_F\approx\SI{23.1}{\hertz}$).}
-\end{figure}
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\linewidth]{\fsipath{output_data/stiffness_damping_contributions.png}}
-  \caption{Contributi modali di massa, rigidezza e smorzamento. La convenzione usata nel
-  codice e' $M_\mathrm{eff}=M_\mathrm{struct}-M_\mathrm{aero}+M_\mathrm{hydro}$,
+  \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/stiffness_damping_contributions.png}}
+  \caption{Contributi modali di massa, rigidezza e smorzamento. Convenzione:
+  $M_\mathrm{eff}=M_\mathrm{struct}-M_\mathrm{aero}+M_\mathrm{hydro}$,
   $K_\mathrm{eff}=K_\mathrm{struct}-K_\mathrm{aero}$,
   $C_\mathrm{eff}=C_\mathrm{struct}-C_\mathrm{aero}+C_\mathrm{hydro}+C_\mathrm{emp}$.}
 \end{figure}
@@ -169,113 +274,65 @@ $\delta=\SI{5}{\per\second}$, pensato per replicare dissipazioni sperimentali ag
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.95\linewidth]{\fsipath{output_data/ABRAMSON1965/ABRAMSON1965_DLM_participants.png}}
-  \caption{Confronto tra contributi strutturali modali $(\hat{C},\hat{K})$ e valori
-  effettivi dopo il contributo DLM/RFA $(C_\mathrm{eff},K_\mathrm{eff})$.}
+  \caption{Contributi strutturali modali $(\hat{C},\hat{K})$ e valori effettivi dopo DLM/RFA
+  $(C_\mathrm{eff},K_\mathrm{eff})$.}
 \end{figure}
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.85\linewidth]{\fsipath{output_data/ABRAMSON1965/ABRAMSON1965_Madded_terms_vs_V_capytaine_vs_strip.png}}
-  \caption{Termini di massa aggiunta modale generalizzata usati nella correzione idroelastica
-  ($m_{11}$, $m_{12}$, $m_{21}$, $m_{22}$), confrontati tra Capytaine e strip theory proiettata
-  sugli stessi modi strutturali. I valori sono costanti con $V$ (Capytaine asintotica; strip
-  indipendente dalla velocita'). Non vanno confusi con la massa aggiunta fisica totale dell'ala.}
+  \caption{Termini di massa aggiunta modale generalizzata ($m_{11}$, $m_{12}$, $m_{21}$, $m_{22}$):
+  confronto tra Capytaine asintotica e strip theory proiettata sugli stessi modi.
+  I valori strip sono costanti con $V$; non vanno confusi con la massa aggiunta fisica totale.}
 \end{figure}
 
 \subsection{Massa fisica totale, massa strutturale modale e massa aggiunta modale}
 
 Nel grafico precedente compaiono termini dell'ordine di \SI{0.3}{\kilogram}--\SI{1.3}{\kilogram}.
-Per interpretare correttamente questi numeri (e i risultati di flutter) e' necessario
-distinguere tre livelli di descrizione: massa fisica totale dell'ala, massa strutturale
-modale generalizzata $\hat{M}$ e massa aggiunta modale generalizzata $A_\infty$.
+Per interpretare correttamente questi numeri e' necessario distinguere tre livelli:
+massa fisica totale dell'ala, massa strutturale modale generalizzata $\hat{M}$ e massa
+aggiunta modale generalizzata $A_\infty$.
 
 \paragraph{Massa strutturale modale generalizzata ($\hat{M}$).}
-La riduzione modale produce la matrice $\hat{M}=\Phi^\top M_\mathrm{struct}\,\Phi$, con
-$\Phi$ costituito dagli autovettori secchi dell'analisi FEA. Gli autovettori sono
-normalizzati rispetto alla massa strutturale ($\phi_i^\top M_\mathrm{struct}\,\phi_i=1$),
-per cui i termini diagonali risultano di per se' unitari:
-\[
-  \hat{M}=\operatorname{diag}(\hat{M}_{11},\,\hat{M}_{22})\approx
-  \operatorname{diag}(\SI{1.00}{\kilogram},\,\SI{1.00}{\kilogram}),
-  \qquad
-  \hat{M}_{12}\approx 0 .
-\]
-Questi valori sono riportati nel file \texttt{stiffness\_damping\_contributions.csv}
-(colonne \texttt{M\_structural\_00/11}) e nel pannello dei contributi $M/K/C$ della
-Figura~3. \textbf{Non} vanno confusi con la massa fisica totale dell'ala
-($\mu L\approx\SI{55}{\kilogram}$): la normalizzazione modale ``comprime'' l'informazione
-fisica in coordinate generalizzate $q_i$ tali che, per un modo puro con $q_i=1$,
-l'energia cinetica strutturale del modo vale $\tfrac{1}{2}\dot q_i^2$ in unita' SI.
-In altre parole, $\hat{M}_{ii}\approx\SI{1}{\kilogram}$ e' la \emph{massa di riferimento}
-del modo $i$ nel sistema ridotto, non il peso dell'idrofoil.
+La riduzione modale produce $\hat{M}=\Phi^\top M_\mathrm{struct}\,\Phi$, con $\Phi$ costituito
+dagli autovettori secchi normalizzati rispetto alla massa strutturale
+($\phi_i^\top M_\mathrm{struct}\,\phi_i=1$). I termini diagonali risultano
+$\hat{M}_{ii}\approx\SI{1}{\kilogram}$: sono masse di riferimento del modo $i$ nel sistema
+ridotto, non la massa fisica $\mu L\approx\SI{55}{\kilogram}$ dell'idrofoil.
 
 \paragraph{Massa aggiunta fisica totale (strip theory, moto rigido).}
-La stima strip implementata nel codice usa la formula del cilindro equivalente per unita' di
-campata:
 \[
   m_a' = \rho\,\frac{\pi c^2}{4}\quad [\si{\kilogram\per\meter}],
   \qquad
   M_\mathrm{add,tot}^{\mathrm{strip}} \approx m_a'\,L .
 \]
-Con $\rho=\SI{997}{\kilogram\per\meter\cubed}$, $c=\SI{0.3048}{\meter}$ e $L=\SI{0.762}{\meter}$
-si ottiene $m_a'\approx\SI{72.7}{\kilogram\per\meter}$ e quindi
-$M_\mathrm{add,tot}^{\mathrm{strip}}\approx\SI{55}{\kilogram}$.
-Questa e' una stima di \emph{massa fisica} associata a un moto rigido tipo traslazione
-trasversale dell'intera campata; e' dello stesso ordine di grandezza della massa strutturale
-lineare $\mu L\approx\SI{55}{\kilogram}$.
+Con $\rho=\SI{997}{\kilogram\per\meter\cubed}$, $c=\SI{0.3048}{\meter}$, $L=\SI{0.762}{\meter}$
+si ottiene $M_\mathrm{add,tot}^{\mathrm{strip}}\approx\SI{55}{\kilogram}$, comparabile a $\mu L$.
 
-\paragraph{Massa aggiunta modale generalizzata (quella nel plot e in $M_\mathrm{eff}$).}
-Nel solver idro-aeroelastico la correzione entra come matrice $2\times2$ in coordinate modali:
-\[
-  M_\mathrm{eff} = \hat{M} + A_\infty,
-  \qquad
-  A_{ij} = \text{massa aggiunta generalizzata tra modo } i \text{ e modo } j .
-\]
-Per la strip theory la proiezione e' esplicita:
-\[
-  \hat{M}_\mathrm{add,strip} = \Phi^\top M_\mathrm{add,strip}^{\mathrm{DOF}}\,\Phi,
-\]
-con $\Phi$ costituito dagli autovettori secchi (normalizzati rispetto alla massa strutturale).
-Capytaine calcola direttamente $A(\omega)$ risolvendo la radiazione sulla mesh 3D completa
-(gia' estrusa su tutta la campata $L$). Nella banda asintotica ad alta frequenza, per profondita'
-\SI{0.0508}{\meter}, i valori medi sono
+\paragraph{Massa aggiunta modale generalizzata.}
+Nel solver $M_\mathrm{eff}=\hat{M}+A_\infty$ con $A_{ij}=\Phi^\top M_\mathrm{add}\,\Phi$.
+Capytaine fornisce $A(\omega)$ su mesh 3D; in banda asintotica ad alta $\omega$,
+per profondita' \SI{0.0508}{\meter}:
 $A_{11}\approx\SI{1.31}{\kilogram}$, $A_{22}\approx\SI{0.28}{\kilogram}$,
 $A_{12}=A_{21}\approx\SI{-0.41}{\kilogram}$.
-
-I termini diagonali modali sono quindi diversi rispetto
-$M_\mathrm{add,tot}^{\mathrm{strip}}$ perche' le forme modali di bending/torsione non
-muovono l'intera sezione come un corpo rigido: la proiezione $\Phi^\top(\cdot)\Phi$ pesa
-solo la parte del campo idrodinamico coerente con ciascuna forma modale.
-Rispetto alla massa strutturale modale di riferimento $\hat{M}_{ii}\approx\SI{1}{\kilogram}$,
-la massa aggiunta Capytaine vale sul modo~1 circa il \SI{130}{\percent} di $\hat{M}_{11}$
-($A_{11}/\hat{M}_{11}\approx1.31$) e sul modo~2 circa il \SI{28}{\percent} di $\hat{M}_{22}$
-($A_{22}/\hat{M}_{22}\approx0.28$): in altre parole, sul primo modo idrodinamico la sola
-massa aggiunta pesa quanto la massa strutturale modale di riferimento, e la massa effettiva
-$M_{\mathrm{eff},11}=\hat{M}_{11}+A_{11}\approx\SI{2.31}{\kilogram}$ e' circa il doppio
-($\sim\SI{230}{\percent}$) della massa strutturale modale del modo~1.
-I termini fuori diagonale $A_{12}\approx\SI{-0.41}{\kilogram}$ descrivono accoppiamento
-idrodinamico tra i due modi tracciati.
+Rispetto a $\hat{M}_{ii}\approx\SI{1}{\kilogram}$, sul modo~1 la sola massa aggiunta Capytaine
+vale circa il 130\% di $\hat{M}_{11}$ e $M_{\mathrm{eff},11}\approx\SI{2.31}{\kilogram}$.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.92\linewidth]{\fsipath{FLUID/capytaine/ABRAMSON1965/results_modal_radiation/added_mass_vs_omega_all_depths.png}}
-  \caption{Massa aggiunta modale $A(\omega)$ da Capytaine (BEM) per due profondita'
-  di immersione. A basse frequenze compaiono piccole oscillazioni; per
-  $\omega\gtrsim\SI{50}{\radian\per\second}$ i termini diagonali convergono ai valori
-  asintotici $A_{11}\approx\SI{1.31}{\kilogram}$, $A_{22}\approx\SI{0.28}{\kilogram}$
-  usati nel flutter solver. Le due profondita' (\SI{0.0508}{\meter} e \SI{0.052}{\meter})
-  producono curve quasi sovrapposte.}
+  \caption{Massa aggiunta modale $A(\omega)$ da Capytaine per due profondita' di immersione.
+  Per $\omega\gtrsim\SI{50}{\radian\per\second}$ i termini diagonali convergono ai valori
+  asintotici usati nel solver idroelastico.}
   \label{fig:capytaine-added-mass-omega}
 \end{figure}
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.92\linewidth]{\fsipath{FLUID/capytaine/ABRAMSON1965/results_modal_radiation/radiation_damping_vs_omega_all_depths.png}}
-  \caption{Smorzamento radiativo modale $B(\omega)$ da Capytaine. I picchi sono
-  concentrati a basse frequenze ($\omega\approx\SI{6}{\radian\per\second}$--\SI{10}{\radian\per\second});
-  oltre $\omega\approx\SI{25}{\radian\per\second}$ il damping radiativo tende a zero.
-  Nella run corrente il solver usa $B_\infty\approx0$ (media asintotica ad alta $\omega$),
-  coerente con queste curve nella banda di flutter ($\omega\sim\SI{60}{\radian\per\second}$--\SI{130}{\radian\per\second}).}
+  \caption{Smorzamento radiativo modale $B(\omega)$ da Capytaine. Oltre
+  $\omega\approx\SI{25}{\radian\per\second}$ il damping radiativo tende a zero; nella banda di
+  flutter il solver usa $B_\infty\approx 0$.}
   \label{fig:capytaine-radiation-damping-omega}
 \end{figure}
 
@@ -292,71 +349,350 @@ idrodinamico tra i due modi tracciati.
     \midrule
     Massa strutturale modale & $\hat{M}_{ii}$ & \SI{1.00}{\kilogram} & \SI{1.00}{\kilogram} \\
     Massa aggiunta modale (Capytaine) & $A_{ii}$ & \SI{1.31}{\kilogram} & \SI{0.28}{\kilogram} \\
-    Rapporto $A_{ii}/\hat{M}_{ii}$ (Capytaine) & -- & $\approx\SI{130}{\percent}$ & $\approx\SI{28}{\percent}$ \\
+    Rapporto $A_{ii}/\hat{M}_{ii}$ (Capytaine) & -- & $\approx 130\%$ & $\approx 28\%$ \\
     Massa aggiunta modale (strip) & $\hat{M}_{\mathrm{add},ii}^{\mathrm{strip}}$ & \SI{0.26}{\kilogram} & \SI{0.45}{\kilogram} \\
     Massa effettiva modale & $M_{\mathrm{eff},ii}$ & \SI{2.31}{\kilogram} & \SI{1.28}{\kilogram} \\
-    Rapporto $M_{\mathrm{eff},ii}/\hat{M}_{ii}$ & -- & $\approx\SI{230}{\percent}$ & $\approx\SI{128}{\percent}$ \\
+    Rapporto $M_{\mathrm{eff},ii}/\hat{M}_{ii}$ & -- & $\approx 230\%$ & $\approx 128\%$ \\
     \bottomrule
   \end{tabular}
 \end{table}
 
+\section{Confronto quantitativo $\mathrm{Im}(Q)$ DLM vs coefficienti misurati (curva~3)}
+\label{sec:imq-measured}
 
-\section{Analisi alternative: PK e strip theory}
+Per verificare se il flutter anticipato del codice e' coerente con un eccesso di
+smorzamento circolatorio DLM rispetto ai coefficienti oscillatori \emph{misurati}
+(Abramson \& Ransleben, curva~3), e' stato implementato il modulo
+\texttt{COUPLING/hydroelastic\_utl/abramson\_imq\_comparison.py} con tabella
+mid-span (50\,\%) da DTIC TR-4 (Tables II--X, $U=V/(b\omega)$).
 
-Oltre alla run RFA con correzione Capytaine, sono disponibili tre confronti aggiuntivi:
-PK senza massa aggiunta strip, PK con massa aggiunta da strip theory, e RFA con massa
-aggiunta da strip theory. Questi risultati sono utili per separare l'effetto del metodo
-di soluzione aeroelastica dall'effetto del modello idrodinamico usato per la massa aggiunta
-e per la gestione delle Qjj.
+\subsection{Due percorsi distinti: misura di galleria e DLM}
+
+Abramson \textbf{non} ha misurato le matrici $Q_{jj}$ del PanelAero ne' la
+$Q_\mathrm{modal}$ del solver attuale. Ha misurato \textbf{coefficienti oscillatori sezionali}
+su un \textbf{modello dedicato} in galleria (Ransleben \& Abramson, JSR 1963; DTIC TR-4);
+il paper di flutter del 1965 \textbf{riusa} quei coefficienti in un calcolo a strip theory
+(curva~3, Figura~5). Il codice FSI calcola invece una matrice di forza aerodinamica
+\textbf{generalizzata modale} $Q_\mathrm{modal}$ dal DLM su un modello FE+griglia pannelli
+diverso. Il confronto nel grafico collega due mondi con una \textbf{proxy calibrata}, non
+un'identita' fisica termine-per-termine.
+
+\begin{enumerate}
+  \item \textbf{Percorso Abramson (1963--65):}
+  modello misura carichi $\to$ $L_{hh},L_{h\alpha},M_{hh},M_{\alpha\alpha}$ vs $U$
+  $\to$ strip a 10 stazioni $\to$ curva~3 (flutter conservativo su $\delta$).
+  \item \textbf{Percorso numerico:}
+  DLM $Q_{jj}(k)$ $\to$ spline $Z$, $Z_{qs}$, $Z_\mathrm{force}$, $\Phi$
+  $\to$ $Q_\mathrm{modal}$ (blocco $2\times2$ flessione--torsione)
+  $\to$ Roger RFA $\to$ $C_\mathrm{aero}\propto\mathrm{Im}(Q)$.
+\end{enumerate}
+
+\subsection{Coefficienti misurati: come e cosa misura Abramson}
+
+\paragraph{Esperimento di galleria (Ref.~2--3).}
+Idroprofilo flessibile in \textbf{galleria chiusa}, trainato, completamente immerso,
+subcavitante. Moti \textbf{imposti} armonici (non il modello flutter che poi si rompe a
+\SI{48.1}{\knunit}):
+\begin{itemize}
+  \item \textbf{flessione} (sussulto) $h$ --- cantilever;
+  \item \textbf{torsione} $\alpha$ --- intorno all'asse elastico (quarto di corda nel modello
+  flutter).
+\end{itemize}
+Per ciascun moto e velocita' si registrano \textbf{portanza oscillante} $L$ e
+\textbf{momento oscillante} $M$ (inizialmente al 31\,\% di corda, poi convertiti al
+\textbf{quarto di corda} = asse elastico del modello flutter, come nel paper).
+
+\paragraph{I quattro fattori della matrice $H(U)$.}
+Sono le derivate oscillatori \textbf{2D sezionali} (notazione classica flessione--torsione).
+Ogni voce e' \textbf{complessa} (modulo + fase in gradi): ampiezza e ritardo del carico
+rispetto al moto armonico. Nella tabella digitata (stazione 50\,\% span) compaiono:
+
+\begin{table}[H]
+  \centering
+  \caption{Coefficienti oscillatori misurati (mid-span, quarto di corda).}
+  \label{tab:H-coeffs}
+  \begin{tabular}{lll}
+    \toprule
+    Simbolo & Significato fisico & Moto che lo genera \\
+    \midrule
+    $L_{hh}$ & Portanza dovuta a flessione & $h$ (sussulto) \\
+    $L_{h\alpha}$ & Portanza dovuta a torsione & $\alpha$ \\
+    $M_{hh}$ & Momento dovuto a flessione & $h$ \\
+    $M_{\alpha\alpha}$ & Momento dovuto a torsione & $\alpha$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Forma strip tipica (armonico, $q=\tfrac{1}{2}\rho V^2$):
+\begin{align}
+  L &= q\,b\left(L_{hh}\,\frac{h}{b} + L_{h\alpha}\,\alpha\right), \\
+  M &= q\,b^2\left(M_{hh}\,\frac{h}{b} + M_{\alpha\alpha}\,\alpha\right).
+\end{align}
+Nel DTIC TR-4: \textbf{nove valori} di $U$ (0--1.67), \textbf{dieci stazioni} lungo il
+semispan; per il confronto semplificato si usa la stazione \textbf{50\,\%}, coerente con
+un'ala uniforme spanwise.
+
+\paragraph{Uso nel paper 1965.}
+Il \textbf{modello flutter} e' separato (trave + strip, $\mu\approx 1$).
+La curva~3 della Figura~5 usa la matrice $H$ \textbf{misurata} in strip theory a 10 stazioni:
+il flutter calcolato risulta \textbf{conservativo} (velocita' di instabilita' \emph{superiore}
+a quella sperimentale). Il grafico $\mathrm{Im}(Q)$ di questo report \textbf{non} riproduce
+quel calcolo strip: confronta un solo canale flessionale modale DLM con una proxy da $L_{hh}$.
+
+\subsection{Matrice aerodinamica modale del codice (DLM)}
+
+\paragraph{Catena nel solver.}
+\begin{enumerate}
+  \item $Q_{jj}(k)$ --- matrice aerodinamica \textbf{pannello--pannello} (DLM 3D, acqua,
+  griglia \texttt{nspan=32}, \texttt{nchord=16}, NACA 16-012).
+  \item Downwash modale: $(\mathrm{j}k Z + Z_{qs})\Phi$, applicazione di $Q_{jj}$, integrazione
+  con aree pannelli e $Z_\mathrm{force}$.
+  \item $Q_\mathrm{modal} = Z_\mathrm{force}^\top A_\mathrm{pan}\,w_\mathrm{modal}$
+  (implementazione in \texttt{aero\_system.py}).
+\end{enumerate}
+La parte \textbf{immaginaria} di $Q$ entra nello smorzamento effettivo come
+$C_\mathrm{aero}\propto (\rho V/2k)\,\mathrm{Im}(Q)$, equivalente al termine $-\tfrac{1}{2}\rho V B_1$
+nel fit Roger.
+
+\paragraph{Significato degli indici $bb$, $pp$, \ldots}
+Nel blocco $2\times2$ sui primi due modi secchi:
+
+\begin{table}[H]
+  \centering
+  \caption{Corrispondenza indici $Q_\mathrm{modal}$ e modi strutturali.}
+  \label{tab:Q-indices}
+  \begin{tabular}{llcc}
+    \toprule
+    Simbolo report & Modo strutturale (secco) & $f$ [Hz] & Ruolo \\
+    \midrule
+    $Q_{bb}$ & Modo 0, flessione & $\approx 10.5$ & Auto-influenza flessionale \\
+    $Q_{pp}$ & Modo 1, torsione & $\approx 20.6$ & Auto-influenza torsionale \\
+    $Q_{bp}$, $Q_{pb}$ & Accoppiamento & -- & Non nel grafico semplificato \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+$Q_{bb}$ \textbf{non} e' uguale a $L_{hh}$: e' gia' una forza generalizzata modale
+[N], ottenuta proiettando la risposta 3D pannello--trave su $\Phi$, non un coefficiente
+sezionale adimensionale.
+
+\subsection{Cosa confrontiamo esattamente nel grafico}
+
+\begin{table}[H]
+  \centering
+  \caption{Quantita' confrontate nella Figura~\ref{fig:imq-measured}.}
+  \label{tab:imq-compare}
+  \begin{tabular}{p{2.2cm}p{5.2cm}p{5.5cm}}
+    \toprule
+    Curva & Definizione & Natura \\
+    \midrule
+    DLM &
+    $\mathrm{Im}(Q_{bb,\mathrm{DLM}})$ da $Q_\mathrm{modal}[0,0]$ &
+    Forza generalizzata; $k(V)=\omega_\mathrm{bend}(V)/V$ del ramo bagnato \\
+    Misurata (cal.) &
+    $\texttt{scale}_{bb}\,\mathrm{Im}(L_{hh}(U))$, $U=V/(b\omega)$ &
+    Proxy: coefficiente sezionale $\times$ fattore di scala \\
+    Rapporto &
+    $|\mathrm{Im}(Q_\mathrm{DLM})|/|\mathrm{Im}(Q_\mathrm{meas})|$ &
+    Adimensionale; evidenzia gap di ampiezza \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\textbf{Non} si confrontano: (i) $Q_{jj}$ grezze con Abramson; (ii) l'intero blocco
+$2\times2$ misurato ($L_{h\alpha}$, $M_{hh}$, $M_{\alpha\alpha}$ ignorati nel grafico);
+(iii) il calcolo strip completo della curva~3.
+
+\paragraph{Convenzione di frequenza ridotta.}
+PanelAero usa $k=\omega/V$ [\si{\per\meter}]. Nel paper $U=V/(b\omega)$, quindi
+\begin{equation}
+  k = \frac{1}{U\,b}
+  \qquad\text{(non }k=1/U\text{).}
+\end{equation}
+Il confronto avviene allo stesso $k$ (equivalentemente allo stesso $U$) usando la
+$\omega$ bagnata del ramo di flessione a ciascuna $V$.
+
+\paragraph{Calibrazione delle unita' (proxy $Q_{bb,\mathrm{meas}}$).}
+I coefficienti di galleria formano la matrice complessa
+$H(U)=\{L_{hh},L_{h\alpha};M_{hh},M_{\alpha\alpha}\}$.
+Non sono direttamente $Q_\mathrm{modal}$ del DLM. La stima nel grafico e' \textbf{diagonale
+bend--bend}:
+\[
+  \mathrm{Im}(Q_{bb,\mathrm{meas}})(U)
+  = \texttt{scale}_{bb}\,\mathrm{Im}(L_{hh}(U)),
+  \qquad
+  \texttt{scale}_{bb}
+  = \frac{\bigl|\mathrm{Im}(Q_{bb,\mathrm{DLM}})\bigr|}{\bigl|\mathrm{Im}(L_{hh})\bigr|}
+  \ \text{a}\ U=1.
+\]
+Valore numerico: $\texttt{scale}_{bb}\approx 0{,}14$.
+Interpretazione: ``se il canale flessionale modale si comportasse come $L_{hh}$ misurato,
+dopo un fattore unico di scala fissato a $U=1$, quanto sarebbe grande $\mathrm{Im}(Q_{bb})$?''
+
+\paragraph{Estensione prevista.}
+Roadmap: $Q_\mathrm{meas,modal}(U)\approx S\,H(U)\,S$ con matrice $S$ da calibrazione
+$2\times2$ a $U=1$ (proiezione su $\Phi$, $Z_\mathrm{force}$), non solo $L_{hh}$.
+
+\subsection{Corrispondenze fisiche e limiti del confronto}
+
+\begin{table}[H]
+  \centering
+  \caption{Cosa e' analogo e cosa differisce tra misura Abramson e DLM.}
+  \label{tab:analogy-limits}
+  \begin{tabular}{p{3.2cm}p{4.8cm}p{4.8cm}}
+    \toprule
+    Aspetto & Abramson (misurato / curva~3) & Codice FSI (DLM) \\
+    \midrule
+    Geometria sezione & NACA 16-012 & Stessa \\
+    Fluido & Acqua, immerso & Acqua \\
+    Fisica & $L,M$ non stazionari da moto armonico & DLM potenziale \\
+    Riduzione & $U=V/(b\omega)$ & Stesso $U$ se $k=\omega/V$ \\
+    Modello & Galleria, modello carichi; strip 10 st. & Ala 3D FE + pannelli \\
+    3D & Misura spanwise reale & Un numero modale diagonale \\
+    Viscosita' & Reale (attutamento strumento aft) & Inviscido \\
+    Accoppiamenti & Matrice $H$ completa & $Q_\mathrm{modal}$ piena; grafico solo $Q_{bb}$ \\
+    Segno $\mathrm{Im}$ & Spesso $\mathrm{Im}(L_{hh})<0$ (fase) & $\mathrm{Im}(Q_{bb})>0$ nel dominio plottato \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Collegamento con $C_\mathrm{aero}$ e flutter.}
+Nel bilancio modale, $C_\mathrm{eff}$ include $-C_\mathrm{aero}$ da $\mathrm{Im}(Q)$.
+Un $|\mathrm{Im}(Q_{bb,\mathrm{DLM}})|$ circa \textbf{dieci volte} la proxy misurata a basse
+$V$ (vedi sotto) implica smorzamento aerodinamico DLM dominante rispetto a
+$C_\mathrm{struct}$ ($\zeta=0{,}03$) e $C_\mathrm{hydro}\approx 0$ nella run RFA+strip ---
+coerente con l'attraversamento anticipato di $\delta=0$ ($V_f\approx\SI{8}{\knunit}$).
+
+\paragraph{Risultato principale (da \texttt{ABRAMSON1965\_qmodal\_bend\_pitch.csv}).}
+Per ogni velocita' dello sweep, $k(V)=\omega_\mathrm{bend}(V)/V$ e
+$U(V)=V/(b\omega)$. Alla velocita' numerica di flutter ($V_f\approx\SI{4.1}{\meter\per\second}$,
+$\approx\SI{8}{\knunit}$):
+\[
+  \frac{|\mathrm{Im}\,Q_{bb,\mathrm{DLM}}|}{|\mathrm{Im}\,Q_{bb,\mathrm{meas,cal}}|}
+  \approx 7\text{--}12
+  \quad (V<\SI{6}{\meter\per\second},\ \mathrm{media}\approx 10).
+\]
+Il DLM \textbf{sovrastima} $|\mathrm{Im}(Q)|$ di circa un ordine di grandezza rispetto ai
+coefficienti misurati alla stessa $k$ --- coerente con l'instabilita' anticipata e con
+\texttt{aero\_im\_Q\_scale}$\approx 0{,}1$--$0{,}15$ come ordine di grandezza di correzione.
+Spesso $\mathrm{Im}(Q_\mathrm{DLM})$ e $\mathrm{Im}(Q_\mathrm{meas})$ hanno \textbf{segno opposto}
+(fase del termine circolatorio diversa $\sim\SI{180}{\degree}$): il problema non e' solo l'ampiezza,
+ma anche la convenzione di fase del contributo non stazionario.
+Il rapporto dipende fortemente da $V$ perche' $\omega(V)$ e $k(V)$ cambiano lungo il ramo bagnato:
+intorno a \SI{15}{\meter\per\second} il modulo delle due curve e' comparabile (rapporto $\approx 1$);
+oltre \SI{20}{\meter\per\second} il DLM risulta \textbf{piu' debole} della proxy
+(rapporto $\approx 0{,}2$--$0{,}3$). Il gap critico per $V_f$ numerico e' quindi nel regime
+$V\lesssim\SI{6}{\meter\per\second}$, non su tutto lo sweep.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/ABRAMSON_PK_vgvf_combined.png}}
-  \caption{Analisi PK senza correzione strip theory (run precedente). Il flutter e' stimato intorno a
-  \SI{11.2}{\knunit}; la frequenza del secondo ramo cresce e decresce rapidamente, mentre il 
-  primo ramo rimane a frequenze piu' basse. Il grafico log decrement method è altissimo, rispetto a risultati 
-  sperimentali.}
+  \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/ABRAMSON1965_ImQ_from_qmodal_vs_measured.png}}
+  \caption{Confronto $\mathrm{Im}(Q_{bb})$ (scala lineare): DLM vs curva~3 calibrata a $U=1$.
+  Destra: $|\mathrm{Im}(Q_\mathrm{DLM})|/|\mathrm{Im}(Q_\mathrm{meas})|$ vs $V$ (scala lineare);
+  picco $\sim 10$ per $V<\SI{6}{\meter\per\second}$.}
+  \label{fig:imq-measured}
+\end{figure}
+
+\paragraph{Script e dati.}
+\begin{itemize}
+  \item Tabella misurata:
+    \texttt{docs/resources/benchmarks/abramson1965\_report/abramson\_measured\_coefficients\_span50.csv}
+  \item Confronto completo (rigenera $Q(k)$ da Qjj):
+    \texttt{examples/ABRAMSON1965/run\_imq\_vs\_measured\_comparison.py}
+  \item Post-processing rapido da CSV esistente:
+    \texttt{examples/ABRAMSON1965/postprocess\_imq\_from\_qmodal\_csv.py}
+  \item Output:
+    \texttt{output\_data/ABRAMSON1965/ABRAMSON1965\_ImQ\_from\_qmodal\_vs\_measured.csv}
+\end{itemize}
+
+\paragraph{Interpretazione e sintesi.}
+\begin{itemize}
+  \item \textbf{Abramson} misura in galleria le risposte aerodinamiche oscillatori sezionali
+  $L_{hh},L_{h\alpha},M_{hh},M_{\alpha\alpha}$ vs $U$; il flutter del paper (curva~3) usa
+  quella matrice in strip theory e risulta conservativo su $\delta(V)$.
+  \item \textbf{Il codice} calcola $Q_\mathrm{modal}$ dal DLM su FE+pannelli; il grafico confronta
+  solo $\mathrm{Im}(Q_{bb})$ con $\mathrm{Im}(L_{hh})$ scalato --- stesso tipo di informazione
+  (parte circolatoria / smorzamento), ma quantita' fisiche diverse.
+  \item Il paper classico e il DLM numerico non sono in contraddizione sulla ``non
+  conservativita''' inviscida (manca smorzamento viscoso $\Rightarrow$ flutter teorico piu' tardi):
+  qui il problema dominante e' una \textbf{sovrastima locale di $\mathrm{Im}(Q)$} DLM rispetto
+  alla proxy da coefficienti misurati nel regime $V_f$, amplificata da $\rho$ acqua e dal fit
+  Roger su tutta la griglia $k$.
+\end{itemize}
+
+\section{RFA + Capytaine (run recente)}
+\label{sec:rfa-capy}
+
+E' stata eseguita la linea \textbf{Roger RFA + strip} (\texttt{roger\_fit=True},
+\texttt{added\_mass\_strip\_theory=True}, \texttt{rfa\_apply\_b2\_mass=False}) con sweep
+$V\in[\SI{1}{\meter\per\second},\SI{23}{\meter\per\second}]$.
+Il solver idroelastico completo \texttt{RFA\_PK\_method} (RFA + Capytaine asintotico in
+$M_\mathrm{eff}$, $C_\mathrm{eff}$) e' disponibile con \texttt{RFA\_PK\_method=True}; nella
+run documentata qui i contributi \texttt{M\_hydro\_Capytaine} e \texttt{C\_hydro\_Capytaine}
+nei CSV risultano nulli perche' non e' attivo \texttt{RFA\_PK\_method} (solo strip in $M_\mathrm{hat}$).
+
+\begin{table}[H]
+  \centering
+  \caption{Flutter numerico aggiornato (RFA+strip, $\zeta=0{,}03$, \texttt{aero\_im\_Q\_scale}=1).}
+  \label{tab:flutter-recent}
+  \begin{tabular}{lcc}
+    \toprule
+    Grandezza & Valore \\
+    \midrule
+    $V_F$ & \SI{4.06}{\meter\per\second} ($\approx\SI{7.9}{\knunit}$) \\
+    $f_F$ (branca~2) & \SI{20.0}{\hertz} \\
+    Sperimentale & \SI{48.1}{\knunit}, \SI{17.5}{\hertz} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Il confronto con Capytaine asintotico ($A_\infty$ modo~1 $\approx\SI{1.31}{\kilogram}$ vs
+strip $\approx\SI{0.29}{\kilogram}$) resta rilevante per la massa, ma nella banda di flutter
+$B_\infty\approx 0$: il gap dominante per $V_f$ resta $\mathrm{Im}(Q)$ DLM
+(\S\ref{sec:imq-measured}), non il damping radiativo Capytaine.
+
+\section{Scala dello smorzamento idrodinamico $\mathrm{Im}(Q_{jj})$}
+\label{sec:imq-scale}
+
+Le componenti immaginarie di $Q_{jj}$ alimentano il termine di smorzamento aerodinamico
+$C_\mathrm{aero}\propto \mathrm{Im}(Q)$. Riducendo \texttt{aero\_im\_Q\_scale} si attenua
+lo smorzamento idrodinamico DLM senza alterare il fit Roger su $\mathrm{Re}(Q)$.
+Le figure seguenti usano sempre RFA+strip e $\zeta_\mathrm{str}=0{,}03$.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/vdelta_vf_Imq_scaled_05_RFA.png}}
+  \caption{RFA+strip, \texttt{aero\_im\_Q\_scale = 0.5}: $V_f\approx\SI{18.1}{\knunit}$
+  sulla branca~2.}
+  \label{fig:imq-05}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/ABRAMSON_PK-STRIP_vgvf_combined.png}}
-  \caption{Analisi PK con massa aggiunta da strip theory. L'andamento delle frequenze
-  bagnate è più plausibile, risulta più basso, data la presenza di più massa aggiunta strip,
-  ma il log decrement e il damping mostrano ancora una scala molto alta per validare i risultati.
-  Molto distante dai punti sperimentali di Abramson.}
+  \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/vdelta_vf_Imq_scaled_04_RFA.png}}
+  \caption{RFA+strip, \texttt{aero\_im\_Q\_scale = 0.4}: $V_f\approx\SI{31.2}{\knunit}$
+  sulla branca~2.}
+  \label{fig:imq-04}
 \end{figure}
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\linewidth]{\fsipath{output_data/ABRAMSON1965/ABRAMSON_RFA-STRIP_vgvf_combined.png}}
-  \caption{Analisi RFA con massa aggiunta da strip theory. Il flutter viene individuato
-  intorno a \SI{12.6}{\knunit}; anche in questa variante la frequenza bagnata segue un trend
-  regolare, mentre la magnitudine dei decrementi resta il punto critico. Questo plot che coincide con risultato pk,
-  permette di validare metodo RFA.}
-\end{figure}
+\paragraph{Discussione.}
+Con \texttt{aero\_im\_Q\_scale}$=1$ la branca~2 attraversa l'instabilita' intorno a
+$V_f\approx\SI{7.9}{\knunit}$ (Tab.~\ref{tab:flutter-recent}).
+Con fattore \textbf{0.5}, $\delta(V)$ cresce piu' lentamente e $V_f\approx\SI{18.1}{\knunit}$
+($f_F\approx\SI{20.7}{\hertz}$).
+Con fattore \textbf{0.4}, $V_f\approx\SI{31.2}{\knunit}$ ($f_F\approx\SI{17.5}{\hertz}$),
+vicino alla frequenza sperimentale ma ancora sotto i \SI{48.1}{\knunit} di rottura.
+Il ramo~1 resta stabilmente smorzato su tutto il dominio plottato.
+La sensibilita' conferma che il bilancio tra smorzamento strutturale ($\zeta=0{,}03$) e
+smorzamento idrodinamico DLM governa la posizione del flutter.
 
-Nel complesso, le varianti PK, PK--strip e RFA--strip confermano la stessa lettura della
-run principale: il comportamento in frequenza e' qualitativamente ragionevole, ma \textbf{la scala
-dei decrementi logaritmici e dello smorzamento e' troppo diversa da quella sperimentale}.
-Questo suggerisce che la discrepanza non dipende solo dall'aggiunta del contributo
-Capytaine nella run corrente..
+\section{Confronto con Figure~5 e~6 ridigitalizzate}
 
-\section{Confronto con figure 5 e 6 ridigitalizzate}
-
-Solo i punti sperimentali delle Figure 5 e 6 del paper sono stati ridigitalizzati
-manualmente dai PNG disponibili in \texttt{docs/resources/benchmarks/notes}; le curve
-teoriche originali di paper ABRAMSON1965, non sono state ridigitalizzate in questa versione del confronto. I CSV
-generati sono:
+I punti sperimentali e la curva teorica~3 (coefficienti 3D misurati) sono stati
+ridigitalizzati dai PNG in \texttt{docs/resources/benchmarks/notes/} e salvati in
 \texttt{abramson\_fig5\_digitized.csv}, \texttt{abramson\_fig6\_digitized.csv} e
-\texttt{abramson\_current\_selected.csv}. I punti sono sufficienti per leggere il trend,
-ma vanno considerati approssimati. (a occhio)
-
-Per confrontare il decadimento con la Figura 5, le curve della run corrente sono lette
-direttamente dal file \texttt{output\_data/vlambda\_data.csv}, cioe' dagli stessi dati
-usati per il pannello $V-\Lambda$ di \texttt{vg\_lambda\_vf\_combined.png}. In questa
-figura non viene applicato alcun ulteriore cambio di segno: branch 1, branch 2 e punti
-sperimentali sono riportati nella convenzione di segno del plot.
+\texttt{abramson\_rfa\_strip\_selected.csv} (curve RFA+strip, \texttt{aero\_im\_Q\_scale}=0.5).
+I valori sono approssimati (lettura grafica); servono al trend qualitativo.
 
 \begin{figure}[H]
   \centering
@@ -365,30 +701,30 @@ sperimentali sono riportati nella convenzione di segno del plot.
       width=0.95\linewidth,
       height=0.52\linewidth,
       xlabel={Velocita' $V$ [kn]},
-      ylabel={Log decrement $\Lambda$ / decadimento [--]},
+      ylabel={$\delta$ [s$^{-1}$]},
       xmin=0, xmax=55,
-      ymin=-15, ymax=16,
+      ymin=-15, ymax=5,
       unbounded coords=jump,
-      legend style={font=\small, at={(0.98,0.98)}, anchor=north east}
+      legend style={font=\small, at={(0.02,0.02)}, anchor=south west}
     ]
       \addplot+[only marks, mark=o, black] table[x=Speed_knots,y=Exp_decay_s_inv,col sep=comma]
         {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_fig5_digitized.csv}};
       \addlegendentry{Abramson, dati sperimentali}
-      \addplot+[very thick, red] table[x=Velocity_knots,y=LogDecrement_Branch_2,col sep=comma]
-        {\fsipath{output_data/vlambda_data.csv}};
-      \addlegendentry{Run corrente, branca 2}
-      \addplot+[thick, red!45, dashed] table[x=Velocity_knots,y=LogDecrement_Branch_1,col sep=comma]
-        {\fsipath{output_data/vlambda_data.csv}};
-      \addlegendentry{Run corrente, branca 1}
-      \addplot[densely dashed, black] coordinates {(48.1,-15) (48.1,16)};
-      \addplot[densely dashed, red] coordinates {(13.3,-15) (13.3,16)};
+      \addplot+[only marks, mark=square, gray] table[x=Speed_knots,y=Curve3_calc_decay_s_inv,col sep=comma]
+        {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_fig5_digitized.csv}};
+      \addlegendentry{Abramson, curva 3 (calc.)}
+      \addplot+[very thick, red] table[x=Speed_knots,y=Decay_s_inv_Branch_2,col sep=comma]
+        {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_rfa_strip_selected.csv}};
+      \addlegendentry{RFA+strip, branca 2}
+      \addplot+[thick, red!45, dashed] table[x=Speed_knots,y=Decay_s_inv_Branch_1,col sep=comma]
+        {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_rfa_strip_selected.csv}};
+      \addlegendentry{RFA+strip, branca 1}
+      \addplot[densely dashed, black] coordinates {(48.1,-15) (48.1,5)};
+      \addplot[densely dashed, red] coordinates {(18.1,-15) (18.1,5)};
     \end{axis}
   \end{tikzpicture}
-  \caption{Confronto sul decadimento/log decrement: i punti sperimentali di Abramson sono
-  riportati insieme ai dati branch 1 e branch 2 del pannello $V-\Lambda$ della run corrente,
-  senza applicare ulteriori flip di segno. La seconda branca numerica attraversa lo zero
-  intorno a \SI{13.3}{\knunit}, mentre il riferimento sperimentale arriva a circa
-  \SI{48}{\knunit}.}
+  \caption{Confronto $\delta(V)$: dati e curva~3 ridigitalizzati vs RFA+strip
+  ($\zeta=0{,}03$, \texttt{aero\_im\_Q\_scale}=0.5).}
 \end{figure}
 
 \begin{figure}[H]
@@ -398,48 +734,58 @@ sperimentali sono riportati nella convenzione di segno del plot.
       width=0.95\linewidth,
       height=0.52\linewidth,
       xlabel={Velocita' $V$ [kn]},
-      ylabel={Frequenza accoppiata [Hz]},
+      ylabel={Frequenza [Hz]},
       xmin=0, xmax=55,
-      ymin=0, ymax=30,
+      ymin=14, ymax=25,
       unbounded coords=jump,
       legend style={font=\small, at={(0.98,0.02)}, anchor=south east}
     ]
       \addplot+[only marks, mark=o, black] table[x=Speed_knots,y=Exp_frequency_cps,col sep=comma]
         {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_fig6_digitized.csv}};
       \addlegendentry{Abramson, dati sperimentali}
+      \addplot+[only marks, mark=square, gray] table[x=Speed_knots,y=Curve3_calc_frequency_cps,col sep=comma]
+        {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_fig6_digitized.csv}};
+      \addlegendentry{Abramson, curva 3 (calc.)}
       \addplot+[very thick, red] table[x=Speed_knots,y=Frequency_Hz_Branch_2,col sep=comma]
-        {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_current_selected.csv}};
-      \addlegendentry{Run corrente, branca 2}
+        {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_rfa_strip_selected.csv}};
+      \addlegendentry{RFA+strip, branca 2}
       \addplot+[thick, red!45, dashed] table[x=Speed_knots,y=Frequency_Hz_Branch_1,col sep=comma]
-        {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_current_selected.csv}};
-      \addlegendentry{Run corrente, branca 1}
-      \addplot[densely dashed, black] coordinates {(48.1,0) (48.1,30)};
-      \addplot[densely dashed, red] coordinates {(13.3,0) (13.3,30)};
+        {\fsipath{docs/resources/benchmarks/abramson1965_report/abramson_rfa_strip_selected.csv}};
+      \addlegendentry{RFA+strip, branca 1}
+      \addplot[densely dashed, black] coordinates {(48.1,14) (48.1,25)};
     \end{axis}
   \end{tikzpicture}
-  \caption{Confronto sulla frequenza: l'andamento delle frequenze bagnate e' qualitativamente
-  coerente con il riferimento, in particolare per la branca torsionale, ma l'instabilita'
-  numerica avviene molto prima del punto di rottura misurato.}
+  \caption{Confronto frequenza accoppiata.}
 \end{figure}
 
+\begin{table}[H]
+  \centering
+  \caption{Riepilogo flutter (branca instabile, RFA + strip, $\zeta=0{,}03$).}
+  \begin{tabular}{lccc}
+    \toprule
+    Caso & \texttt{aero\_im\_Q\_scale} & $V_F$ [kn] & $f_F$ [Hz] \\
+    \midrule
+    Sperimentale & --- & 48.1 & 17.5 \\
+    RFA + strip & 1.0 & $\sim$8 & $\sim$20 \\
+    RFA + strip & 0.5 & 18.1 & $\approx$20.7 \\
+    RFA + strip & 0.4 & 31.2 & $\approx$17.5 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
-\section{Conclusione}
+\section{Conclusioni}
 
-Lo stato attuale della pipeline e' operativo: produce modi secchi, matrici DLM, correzione
-Capytaine, sweep Roger RFA, contributi $M/K/C$ e grafici $V-\Lambda-g-f$. Il risultato piu'
-incoraggiante e' che le frequenze modali a secco (flessione \SI{10.5}{\hertz}, torsione
-\SI{20.6}{\hertz}) sono allineate alla Tabella~1 del paper. Le frequenze bagnate hanno un andamento
-compatibile con quello atteso. Tuttavia, come benchmark ABRAMSON1965, la soluzione corrente
-non e' ancora validata: \textbf{la scala dei decrementi logaritmici resta molto diversa da quella
-sperimentale} e il flutter e' predetto a \SI{13.3}{\knunit} invece dei \SI{48.1}{\knunit} sperimentali. I risultati dell'analisi RFA 
-riproducono pressochè i risultati dell'analisi PK, confermando la correttezza del metodo numerico usato.
-
-Per riprodurre i risultati sperimentali sembra sia necessario:
-\begin{itemize}
-  \item molto più damping idrodinamico, in particolare nella banda asintotica,
-  che sembra essere il punto critico. La curva di decadimento/log decrement
-  dovrebbe essere spostata di circa 4 dB verso l'alto..
-\end{itemize}
-
+La pipeline produce modi secchi, matrici DLM, sweep Roger RFA, contributi $M/K/C$ e grafici
+$V$--$\delta$--$g$--$f$ in unita' Abramson.
+Le frequenze a secco (\SI{10.5}{\hertz} flessione, \SI{20.6}{\hertz} torsione) sono allineate
+alla Tabella~1; le frequenze bagnate seguono il trend sperimentale, ma il flutter numerico
+resta \emph{anticipato} rispetto ai \SI{48.1}{\knunit} misurati: il confronto
+$\mathrm{Im}(Q)$ (\S\ref{sec:imq-measured}) indica una sovrastima DLM di circa
+$\times 7$--$\times 12$ su $|\mathrm{Im}(Q_{bb})|$ alla stessa $k$ dei coefficienti misurati
+nel regime $V_f$ numerico. Calibrazioni possibili: \texttt{aero\_im\_Q\_scale},
+coefficienti misurati al posto del DLM, o Capytaine + strip coerente in $M_\mathrm{eff}$.
+Come benchmark ABRAMSON1965, la configurazione \textbf{RFA + strip} con
+$\zeta_\mathrm{str}=0{,}03$ e $\delta$ dagli autovalori bagnati e' la base di confronto
+con le Figure~5 e~6 del paper.
 
 \end{document}

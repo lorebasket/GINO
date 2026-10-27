@@ -92,7 +92,35 @@ def _expand_free_dofs_to_nodes(beam_model: dict, dry_vectors: np.ndarray, dof_pe
     return full
 
 
-def plot_shapes(beam_length_or_model=None, n_elements_or_none=None, dry_vectors=None, num_modes=None, title_suffix="", beam_model=None):
+def _normalize_mode_columns(full_vectors: np.ndarray, ref_length: float | None, dof_per_node: int = 6) -> np.ndarray:
+    """Rescale each mode column to unit maximum amplitude.
+
+    The per-mode scale is max(|translations|, ref_length * |rotations|) so that
+    rotation DOFs [rad] are made commensurate with translation DOFs [m] via a
+    reference length (typically the semichord b). With ref_length=None only
+    translations set the scale (pure unit-tip normalization), unless a mode has
+    negligible translation content, in which case rotations are used as fallback.
+    """
+    normalized = full_vectors.astype(float, copy=True)
+    n_dofs = normalized.shape[0]
+    trans_mask = np.zeros(n_dofs, dtype=bool)
+    for k in range(3):
+        trans_mask[k::dof_per_node] = True
+
+    for mode in range(normalized.shape[1]):
+        col = normalized[:, mode]
+        max_trans = np.max(np.abs(col[trans_mask])) if trans_mask.any() else 0.0
+        max_rot = np.max(np.abs(col[~trans_mask])) if (~trans_mask).any() else 0.0
+        if ref_length is not None:
+            scale = max(max_trans, float(ref_length) * max_rot)
+        else:
+            scale = max_trans if max_trans > 1e-14 else max_rot
+        if scale > 1e-14:
+            normalized[:, mode] = col / scale
+    return normalized
+
+
+def plot_shapes(beam_length_or_model=None, n_elements_or_none=None, dry_vectors=None, num_modes=None, title_suffix="", beam_model=None, output_dir=None, normalize=False, ref_length=None):
     """
     Plot dry mode shapes (displacements and rotations) for each mode.
 
@@ -116,6 +144,10 @@ def plot_shapes(beam_length_or_model=None, n_elements_or_none=None, dry_vectors=
         num_modes: Number of modes to plot
         title_suffix: Optional string to append to plot title (e.g., "(Pre-Reduction)")
         beam_model: (keyword-only) Alternative way to pass beam_model as named argument
+        normalize: If True, rescale each mode to unit max amplitude,
+            max(|translations|, ref_length*|rotations|), before plotting
+        ref_length: Reference length [m] (typically semichord b) making
+            rotations commensurate with translations in the normalization
     """
     # Handle keyword-only beam_model argument
     if beam_model is not None:
@@ -161,9 +193,12 @@ def plot_shapes(beam_length_or_model=None, n_elements_or_none=None, dry_vectors=
         full_vectors = dry_vectors
         plot_node_indices = list(range(len(x_positions)))
 
+    if normalize:
+        full_vectors = _normalize_mode_columns(full_vectors, ref_length, dof_per_node=DOF_PER_NODE)
+
     # Create a figure with 2 rows (displacements and rotations) and 3 columns (x, y, z)
     fig, axs = plt.subplots(2, 3, figsize=(18, 10))
-    title_text = 'Mode Shape Analysis' + (f' {title_suffix}' if title_suffix else '')
+    title_text = 'Mode Shape Analysis' + (' (normalized)' if normalize else '') + (f' {title_suffix}' if title_suffix else '')
     fig.suptitle(title_text, fontsize=16)
 
     # Plot displacements in the first row
@@ -234,11 +269,13 @@ def plot_shapes(beam_length_or_model=None, n_elements_or_none=None, dry_vectors=
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust layout to make room for the suptitle
     
-    # Save the plot to output_data directory
     import os
-    output_dir = os.path.join(os.path.dirname(__file__), '../../output_data')
+    if output_dir is None:
+        _fsi_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+        output_dir = os.path.join(_fsi_root, 'output_data')
     os.makedirs(output_dir, exist_ok=True)
-    plot_filename = os.path.join(output_dir, f'mode_shapes{title_suffix.replace(" ", "_")}.png')
+    norm_tag = '_normalized' if normalize else ''
+    plot_filename = os.path.join(output_dir, f'mode_shapes{norm_tag}{title_suffix.replace(" ", "_")}.png')
     plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
     print(f"Mode shapes plot saved to: {plot_filename}")
     

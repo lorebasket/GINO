@@ -1,0 +1,10 @@
+{
+  "case": "Model2t",
+  "method": "PK + native DLM (circulatory + kernel non-circulatory; no BEM/strip)",
+  "baseline_id": "_baseline_GINO_DLM_only",
+  "aero_method": "panelaero",
+  "aero_b2_removal": false,
+  "pk_capytaine_matrices": false,
+  "added_mass_strip_theory": false,
+  "elapsed_s": 49.74753427505493
+}

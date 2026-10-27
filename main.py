@@ -14,6 +14,7 @@ sys.path.extend([
     os.path.join(FSI_path, 'STRUCTURE', 'FEA', 'fea_utl'),    # direct fea_utl module access
     os.path.join(FSI_path, 'FLUID', 'PanelAero'),             # exposes panelaero_utl package
     os.path.join(FSI_path, 'FLUID'),                          # exposes aerodynamic_model module
+    os.path.join(FSI_path, 'FLUID', 'capytaine'),             # capytaine_workflow, run_modal_radiation
 ])
 
 
@@ -37,7 +38,7 @@ class Logger:
 
 
 from examples import config
-from FEA import post_pitch_utils
+from FEA import post_dihedral_utils
 from FEA import structural_model
 from FEA import structural_analysis
 import aerodynamic_model
@@ -160,7 +161,22 @@ def run_flutter_analysis_single(case_name, alpha_deg, *, n_lag=None, vg_vf_outpu
             n_elements_or_none=None,
             dry_vectors=structural_results.dry_eigenvectors_full,
             num_modes=len(structural_results.dry_frequencies),
-            title_suffix=f"α={alpha_deg}°"
+            title_suffix=f"α={alpha_deg}°",
+            output_dir=analysis_config.output_dir,
+        )
+
+    if getattr(analysis_config, 'plot_normalized_mode_shapes', False):
+        print("\nPlotting normalized mode shapes...")
+        chord = getattr(analysis_config, 'chord', None)
+        mode_shape_analysis.plot_shapes(
+            beam_model=beam_model,
+            n_elements_or_none=None,
+            dry_vectors=structural_results.dry_eigenvectors_full,
+            num_modes=len(structural_results.dry_frequencies),
+            title_suffix=f"α={alpha_deg}°",
+            output_dir=analysis_config.output_dir,
+            normalize=True,
+            ref_length=0.5 * float(chord) if chord is not None else None,
         )
 
     # 4. Build Aerodynamic Model
@@ -169,18 +185,17 @@ def run_flutter_analysis_single(case_name, alpha_deg, *, n_lag=None, vg_vf_outpu
         aero_source=analysis_config.aero_source
     )
 
-    # ABRAMSON1965: optional structural pitch about +X after Y-reference build
-    # (beam, global K/M, modes, aerogrid) — see post_pitch_utils.
-    if analysis_config.name == "ABRAMSON1965" and abs(
-        float(getattr(analysis_config, "pitch", 0.0))
-    ) > 1e-12:
-        rotate_beam = bool(getattr(analysis_config, "pitch_rotate_beam", True))
-        rotate_aerogrid = bool(getattr(analysis_config, "pitch_rotate_aerogrid", True))
-        structural_results, beam_model, aerogrid = post_pitch_utils.apply_structural_pitch_about_x(
+    # Abramson-style cases (ABRAMSON1965, Model1, …): structural dihedral about +X
+    # after Y-reference build (beam, global K/M, modes, aerogrid) — post_dihedral_utils.
+    dihedral_deg = float(getattr(analysis_config, "dihedral_angle", 0.0))
+    if abs(dihedral_deg) > 1e-12 and not getattr(analysis_config, "skip_post_dihedral_coupling", False):
+        rotate_beam = bool(getattr(analysis_config, "dihedral_rotate_beam", True))
+        rotate_aerogrid = bool(getattr(analysis_config, "dihedral_rotate_aerogrid", True))
+        structural_results, beam_model, aerogrid = post_dihedral_utils.apply_structural_dihedral_about_x(
             beam_model,
             structural_results,
             aerogrid,
-            float(analysis_config.pitch),
+            dihedral_deg,
             rotate_beam=rotate_beam,
             rotate_aerogrid=rotate_aerogrid,
         )
@@ -190,7 +205,7 @@ def run_flutter_analysis_single(case_name, alpha_deg, *, n_lag=None, vg_vf_outpu
         if rotate_aerogrid:
             targets.append("aerogrid")
         print(
-            f"Applied structural pitch {float(analysis_config.pitch):.4f}° about +X "
+            f"Applied structural dihedral {dihedral_deg:.4f}° about +X "
             f"(post-build: {', '.join(targets) or 'none'})."
         )
     
@@ -206,7 +221,10 @@ def run_flutter_analysis_single(case_name, alpha_deg, *, n_lag=None, vg_vf_outpu
         post_processing.plot_aero_beam_model(aerogrid, beam_model, analysis_config)
     
     # 5. Compute Aero-Structural Coupling
-    coupling_results = aero_structural_coupling.calculate_spline_matrix(beam_model, aerogrid, analysis_config)
+    coupling_results = aero_structural_coupling.calculate_spline_matrix(
+        beam_model, aerogrid, analysis_config,
+        constrained_dofs=structural_results.constrained_dofs,
+    )
     
     # PLOT DEFORMED MODE SHAPES ON AEROGRID (like a vibrating plate)
     if analysis_config.plot_deformed_modes:
@@ -222,6 +240,16 @@ def run_flutter_analysis_single(case_name, alpha_deg, *, n_lag=None, vg_vf_outpu
             n_frames=analysis_config.animation_frames
         )
 
+    # Ensure Capytaine A(ω), B(ω) exist and match current dry modes / beam geometry
+    from capytaine_workflow import ensure_capytaine_matrices, needs_capytaine_matrices
+
+    if needs_capytaine_matrices(analysis_config):
+        ensure_capytaine_matrices(
+            analysis_config,
+            structural_results,
+            beam_model,
+            force=bool(getattr(analysis_config, "capytaine_force_recalc", False)),
+        )
 
     # 6. Solve for Flutter
     flutter_results = flutter_solver.solve(
@@ -257,14 +285,46 @@ def run_flutter_analysis_single(case_name, alpha_deg, *, n_lag=None, vg_vf_outpu
     tag = vg_vf_output_tag
     if tag is None and n_lag is not None:
         tag = f"nlag{int(n_lag)}"
-    post_processing.plot_vg_vf(flutter_results, analysis_config, output_tag=tag)
-    # Eigenvalue trajectory plot only available for PK method (not for Roger RFA)
+    post_processing.plot_vg_vf(flutter_results, analysis_config, save_path=None, show_plot=analysis_config.plot_vg_vf, output_tag=tag)
+    if getattr(analysis_config, "plot_flow_added_damping_benchmark", False):
+        from COUPLING.hydroelastic_utl.flow_added_damping_benchmark import (
+            plot_flow_added_damping_benchmark,
+            print_naca0003_geometry_check,
+        )
+        print_naca0003_geometry_check(analysis_config)
+        plot_flow_added_damping_benchmark(
+            flutter_results,
+            structural_results,
+            analysis_config,
+            output_tag=tag,
+        )
+    # Eigenvalue trajectory / wet-root plots need raw_results (PK or Roger RFA)
     if flutter_results.raw_results is not None:
         post_processing.plot_eigenvalue_trajectory(flutter_results, flutter_results.raw_results, analysis_config)
-        if getattr(analysis_config, "plot_pk_wet_eigenvectors", False):
+        if getattr(analysis_config, "plot_pk_wet_eigenvectors", True):
             post_processing.plot_pk_converged_wet_eigenvectors(flutter_results, analysis_config)
+        if getattr(analysis_config, "plot_orphan_wet_root_on_vgvf", False):
+            post_processing.plot_orphan_wet_root_on_vgvf(
+                flutter_results,
+                config=analysis_config,
+                show_plot=getattr(
+                    analysis_config, "show_orphan_wet_root_on_vgvf", False
+                ),
+            )
     else:
-        print("\nNote: Eigenvalue trajectory plot not available for Roger RFA method (uses direct eigenvalue sweep)")
+        print("\nNote: Eigenvalue trajectory / untracked wet-root plots need raw_results (PK or Roger RFA).")
+    if getattr(analysis_config, "plot_pk_converged_mac", True) or getattr(
+        analysis_config, "plot_converged_mac", True
+    ):
+        post_processing.plot_pk_converged_mac_history(
+            flutter_results,
+            config=analysis_config,
+            show_plot=getattr(
+                analysis_config,
+                "show_pk_converged_mac_plot",
+                getattr(analysis_config, "show_converged_mac_plot", False),
+            ),
+        )
     if getattr(analysis_config, "plot_stiffness_damping_contributions", True):
         post_processing.plot_stiffness_damping_contributions(
             pk_solver=flutter_results.pk_solver,
@@ -274,6 +334,28 @@ def run_flutter_analysis_single(case_name, alpha_deg, *, n_lag=None, vg_vf_outpu
         )
     if getattr(analysis_config, 'plot_DLM_participants', False):
         post_processing.plot_DLM_participants(flutter_results, config=analysis_config)
+    if getattr(analysis_config, "plot_modal_aero_bend_pitch_diagnostic", False):
+        post_processing.diagnose_modal_aero_bend_pitch(
+            analysis_config,
+            structural_results,
+            coupling_results,
+            flutter_results,
+            show_plot=getattr(analysis_config, "show_modal_aero_bend_pitch_diagnostic", False),
+        )
+    if getattr(analysis_config, "plot_abramson_imq_comparison", False):
+        from COUPLING.hydroelastic_utl import abramson_imq_comparison
+
+        try:
+            abramson_imq_comparison.run_imq_comparison(
+                analysis_config,
+                structural_results,
+                coupling_results,
+                aerogrid,
+                save_path=analysis_config.output_dir,
+                show_plot=False,
+            )
+        except Exception as e:
+            print(f"[Warning] Abramson Im(Q) comparison failed: {e}")
     
     print(f"✓ Flutter analysis completed for α = {alpha_deg}°")
     if flutter_results.flutter_speed is not None:
@@ -313,6 +395,11 @@ Examples:
         "value and writes vg_vf_combined_<tag>.png (and matching CSVs) under output_dir. "
         "Empty: use n_lag from the case config (single run, default filenames).",
     )
+    parser.add_argument(
+        "--force-capytaine",
+        action="store_true",
+        help="Recompute Capytaine modal radiation matrices even if a matching cache exists.",
+    )
 
     args = parser.parse_args()
     case_name = args.case_name
@@ -328,8 +415,8 @@ Examples:
 
     n_lag_sweep = _parse_n_lag_list(args.n_lag_list)
 
-    # Setup logging to file
-    log_dir = os.path.join(FSI_path, 'output_data')
+    # Setup logging to file (same folder as other case outputs)
+    log_dir = os.path.join(FSI_path, 'output_data', case_name)
     os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -357,6 +444,7 @@ Examples:
                 print(f"{'='*70}\n")
                 run_flutter_analysis_single(case_name, alpha_deg, n_lag=nl)
         else:
+            _analysis_config.capytaine_force_recalc = bool(args.force_capytaine)
             run_flutter_analysis_single(case_name, alpha_deg)
     
     finally:

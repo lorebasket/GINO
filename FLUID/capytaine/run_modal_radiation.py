@@ -24,16 +24,19 @@ This script:
     matplotlib backend, e.g. TkAgg). See also ``COUPLING/debug/plot_mode_shape_on_mesh.py`` for
     vertex-wise beam kinematics independent of this script.
 
-    **Beam CSV → hydro mesh:** when ``config.pitch`` / ``alpha_deg`` / ``dihedral_angle`` rotate the
+    **Beam CSV → hydro mesh:** when ``config.dihedral_angle`` / ``alpha_deg`` / ``wing_dihedral_angle`` rotate the
     hull (as in ``build_capytaine_mesh.py``), beam node positions and nodal translation/rotation blocks
-    in the eigenvector are rotated by the same ``R`` into the hydro frame, and ``span_axis`` is
-    inferred from beam extent unless ``capytaine_modal_span_axis`` or ``--span-axis`` is set.
-    Use ``--skip-hydro-beam-alignment`` only to recover the old (often inconsistent) behaviour.
+    in the eigenvector are rotated by the same ``R`` into the hydro frame **unless**
+    ``dihedral_rotate_beam=True`` and the dry modal CSV was exported after ``post_dihedral_utils``
+    (default in ``main.py`` / ``ensure_capytaine_matrices``), in which case ``R`` is skipped to
+    avoid double rotation. ``span_axis`` is taken from ``capytaine_modal_span_axis``, ``--span-axis``,
+    or ``beam_span_axis``, else inferred from beam nodal extent in the hydro frame.
+    Use ``--skip-hydro-beam-alignment`` to keep beam CSV in the reference +Y-span frame.
 
-    Rigid-body mode with non-identity ``pitch`` / ``alpha_deg`` / ``dihedral_angle`` (same compound
+    Rigid-body mode with non-identity ``dihedral_angle`` / ``alpha_deg`` / ``wing_dihedral_angle`` (same compound
     rotation as ``build_capytaine_mesh.py``): global-axis Surge…Yaw matrices are also written and
     plotted in a **beam-local** basis via ``M_beam = T^T M_global T`` with ``T = blkdiag(R, R)``,
-    ``R = R_x(pitch) R_y(α) R_y(Γ)``. Outputs: ``*_beam_local*`` PNG/CSV and ``added_mass_beam_local``
+    ``R = R_x(Γ_x) R_y(α) R_y(Γ_y)``. Outputs: ``*_beam_local*`` PNG/CSV and ``added_mass_beam_local``
     keys inside per-depth ``modal_radiation_AB*.npz`` metadata.
 
 Example:
@@ -73,7 +76,7 @@ def _rotation_y(angle_deg: float) -> np.ndarray:
 
 
 def _rotation_x(angle_deg: float) -> np.ndarray:
-    """Structural pitch about +X, same as ``build_capytaine_mesh.py`` / ``rotate_beams_x``."""
+    """Structural dihedral about +X, same as ``build_capytaine_mesh.py`` / ``rotate_beams_x``."""
     t = np.deg2rad(float(angle_deg))
     c, s = np.cos(t), np.sin(t)
     return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]], dtype=float)
@@ -84,12 +87,65 @@ def _beam_to_global_rotation_from_cfg(cfg) -> np.ndarray:
     Rotation ``R`` mapping vectors from the mesher beam frame (X chord, Y span, Z thickness)
     into global axes — same as ``build_capytaine_mesh.py``:
 
-        R = R_x(pitch) @ R_y(alpha) @ R_y(dihedral)
+        R = R_x(dihedral) @ R_y(alpha) @ R_y(wing_dihedral)
     """
-    pitch = float(getattr(cfg, "pitch", 0.0))
-    alpha = float(getattr(cfg, "alpha_deg", 0.0))
     dihedral = float(getattr(cfg, "dihedral_angle", 0.0))
-    return _rotation_x(pitch) @ _rotation_y(alpha) @ _rotation_y(dihedral)
+    alpha = float(getattr(cfg, "alpha_deg", 0.0))
+    wing_dihedral = float(getattr(cfg, "wing_dihedral_angle", 0.0))
+    return _rotation_x(dihedral) @ _rotation_y(alpha) @ _rotation_y(wing_dihedral)
+
+
+def _expected_hydro_span_axis(cfg) -> int:
+    """Global axis along which the beam span lies after hydro mesh alignment."""
+    val = getattr(cfg, "beam_span_axis", None)
+    if val is not None:
+        return int(val)
+    R = _beam_to_global_rotation_from_cfg(cfg)
+    mapped = np.abs(R @ np.array([0.0, 1.0, 0.0]))
+    return int(np.argmax(mapped))
+
+
+def _beam_modal_csv_already_in_hydro_frame(cfg, beam_pos_raw: np.ndarray | None = None) -> bool:
+    """
+    True when dry modal CSV node coordinates (and matching phi) are already in the
+    hydro mesh frame.
+
+    ``dihedral_rotate_beam=True`` alone is not sufficient: CSVs written during the
+    initial dry modal solve (before ``post_dihedral_utils``) still lie in the
+    reference +Y span frame. When ``beam_pos_raw`` is supplied, nodal extent is
+    checked along ``beam_span_axis`` / the axis implied by the hydro rotation.
+    """
+    if not bool(getattr(cfg, "dihedral_rotate_beam", True)):
+        return False
+    R = _beam_to_global_rotation_from_cfg(cfg)
+    if np.allclose(R, np.eye(3), atol=1e-12, rtol=0.0):
+        return True
+    if beam_pos_raw is None:
+        return False
+    ext = np.ptp(np.asarray(beam_pos_raw, dtype=float), axis=0)
+    span_axis = _expected_hydro_span_axis(cfg)
+    beam_length = float(getattr(cfg, "beam_length", ext.max(initial=0.0)))
+    tol = max(1e-6, 0.05 * beam_length)
+    if float(ext[span_axis]) >= tol:
+        return True
+    ref_axis = int(np.argmax(ext))
+    if ref_axis != span_axis and float(ext[ref_axis]) >= tol:
+        return False
+    return False
+
+
+def _hydro_alignment_rotation(
+    cfg,
+    *,
+    align_beam_to_hydro_mesh: bool,
+    beam_pos_raw: np.ndarray | None = None,
+) -> np.ndarray:
+    """Rotation applied to beam CSV nodes / phi when mapping onto the hydro mesh."""
+    if not align_beam_to_hydro_mesh:
+        return np.eye(3, dtype=float)
+    if _beam_modal_csv_already_in_hydro_frame(cfg, beam_pos_raw):
+        return np.eye(3, dtype=float)
+    return _beam_to_global_rotation_from_cfg(cfg)
 from modal_radiation_io import save_modal_radiation_npz  # noqa: E402
 
 # Plotting: added mass per-depth files use an absolute floor; multi-depth overlay
@@ -212,8 +268,8 @@ def _span_interp(y_colloc: float, beam_pos: np.ndarray, span_axis: int):
     if y_rng < 1e-10:
         raise ValueError(
             f"Degenerate beam span along axis {span_axis}: coordinate range is {y_rng:g} m. "
-            "Beam node CSV likely does not vary along this axis (e.g. mesh pitched with "
-            "config.pitch but nodes still unpitched, or wrong --span-axis / capytaine_modal_span_axis)."
+            "Beam node CSV likely does not vary along this axis (e.g. mesh rotated with "
+            "config.dihedral_angle but nodes still in reference frame, or wrong --span-axis / capytaine_modal_span_axis)."
         )
     j = int(np.searchsorted(y_sorted, y_colloc))
     j = int(np.clip(j, 1, len(y_sorted) - 1))
@@ -227,7 +283,8 @@ def _span_interp(y_colloc: float, beam_pos: np.ndarray, span_axis: int):
     return i_lo, i_hi, 1.0 - xi, xi
 
 
-def _compute_displacements(points: np.ndarray, beam_pos: np.ndarray, phi_full: np.ndarray, span_axis: int) -> np.ndarray:
+def _compute_displacements(points: np.ndarray, beam_pos: np.ndarray, phi_full: np.ndarray, span_axis: int,
+                           torsion_sign: float = 1.0) -> np.ndarray:
     """
     Map a beam eigenvector ``phi_full`` to 3-D displacements at arbitrary ``points``.
 
@@ -258,6 +315,10 @@ def _compute_displacements(points: np.ndarray, beam_pos: np.ndarray, phi_full: n
     beam_pos : (n_nodes, 3) array — beam node positions in the same frame as ``points``.
     phi_full : (n_nodes * 6,) array — full eigenvector with constrained DOFs zeroed.
     span_axis: axis index (0/1/2) along which beam nodes are sorted for interpolation.
+    torsion_sign: multiplies the rotation about ``span_axis`` (``config.bem_torsion_sign``).
+               -1 for structures whose sectional mass uses M[w, theta_y] = +mu*e with e aft
+               (structural_model._apply_mass_cg_coupling, legacy GOLAND_water / TFOIL_SIMPLE):
+               there a positive torsion lifts the aft points, opposite to theta x r.
     """
     out = np.empty_like(points, dtype=float)
     for i in range(points.shape[0]):
@@ -267,6 +328,7 @@ def _compute_displacements(points: np.ndarray, beam_pos: np.ndarray, phi_full: n
         q_hi = phi_full[i_hi * 6 : i_hi * 6 + 6]
         u  = n1 * q_lo[:3]  + n2 * q_hi[:3]   # interpolated translation
         th = n1 * q_lo[3:6] + n2 * q_hi[3:6]  # interpolated rotation
+        th[span_axis] *= torsion_sign
         x_ea = n1 * beam_pos[i_lo] + n2 * beam_pos[i_hi]   # interpolated elastic axis
         # Rigid cross-section: d = u + theta × (p - x_ea)
         out[i] = u + np.cross(th, p - x_ea)
@@ -277,6 +339,75 @@ def _infer_span_axis_from_beam_positions(beam_pos: np.ndarray) -> int:
     """Pick axis (0,1,2) along which beam node coordinates have the largest extent."""
     ext = beam_pos.max(axis=0) - beam_pos.min(axis=0)
     return int(np.argmax(ext))
+
+
+def _resolve_modal_span_axis(cfg, cli_span_axis: int | None) -> int | None:
+    """
+    Span axis for beam→face interpolation in the hydro mesh frame.
+
+    Priority: ``capytaine_modal_span_axis`` → ``--span-axis`` → ``beam_span_axis`` →
+    ``None`` (infer largest nodal extent after optional hydro alignment).
+    """
+    val = getattr(cfg, "capytaine_modal_span_axis", None)
+    if val is not None:
+        return int(val)
+    if cli_span_axis is not None:
+        return int(cli_span_axis)
+    val = getattr(cfg, "beam_span_axis", None)
+    if val is not None:
+        return int(val)
+    return None
+
+
+def _phi_normalization_scale(phi_full: np.ndarray, mode: str = "geometric") -> float:
+    """
+    Amplitude used to rescale beam eigenvectors before mapping to face displacements.
+
+    ``geometric`` (recommended): max|phi| over all 6 DOFs per node → max(|phi|)=1 on the
+    FEM vector before BEM.  Capytaine added-mass results are converted back to the
+    mass-normalized modal basis via ``_bem_modal_matrices_to_mass_basis`` (scale²).
+
+    ``translation``: max over Ux, Uy, Uz only.  ``all`` / ``max``: alias of ``geometric``.
+    ``none``: no scaling (legacy; mass-normalized phi → added mass ~scale² too small).
+    """
+    key = str(mode or "geometric").strip().lower()
+    if key in ("none", "raw", "off", "false", "0"):
+        return 1.0
+    if key in ("geometric", "geo", "all", "max", "full", "6dof"):
+        scale = float(np.max(np.abs(phi_full)))
+    elif key in ("translation", "trans", "disp", "u"):
+        trans = np.concatenate(
+            [np.asarray(phi_full[0::6], dtype=float).ravel(),
+             np.asarray(phi_full[1::6], dtype=float).ravel(),
+             np.asarray(phi_full[2::6], dtype=float).ravel()],
+        )
+        scale = float(np.max(np.abs(trans))) if trans.size else 0.0
+    else:
+        raise ValueError(
+            f"Unknown capytaine_phi_normalization={mode!r}. "
+            "Use 'geometric', 'translation', or 'none'."
+        )
+    return scale if scale > 0.0 and np.isfinite(scale) else 1.0
+
+
+def _bem_modal_matrices_to_mass_basis(
+    mat: np.ndarray,
+    phi_bem_scale_factors: np.ndarray,
+) -> np.ndarray:
+    """
+    Map Capytaine A(ω) or B(ω) from geometric BEM DOFs (max|phi|=1) to mass-normalized
+    modal coordinates:  A_mass[i,j] = A_bem[i,j] * s[i] * s[j].
+    """
+    s = np.asarray(phi_bem_scale_factors, dtype=float).ravel()
+    mat = np.asarray(mat, dtype=float)
+    if mat.ndim != 3:
+        raise ValueError(f"Expected (n_omega, n_modes, n_modes), got {mat.shape}")
+    if s.size != mat.shape[1]:
+        raise ValueError(
+            f"phi_bem_scale_factors length {s.size} != n_modes {mat.shape[1]}"
+        )
+    outer = np.outer(s, s)
+    return mat * outer[np.newaxis, :, :]
 
 
 def _rotate_nodal_phi_to_hydro_frame(phi_full: np.ndarray, n_nodes: int, R: np.ndarray) -> np.ndarray:
@@ -306,7 +437,8 @@ def _build_face_displacements_from_beam(
     disp_scale: float,
     cfg,
     align_beam_to_hydro_mesh: bool = True,
-) -> tuple[list[str], np.ndarray, int]:
+    phi_normalization: str = "geometric",
+) -> tuple[list[str], np.ndarray, int, np.ndarray]:
     nodes_csv = os.path.join(modal_dir, f"{prefix}_nodes.csv")
     constrained_csv = os.path.join(modal_dir, f"{prefix}_constrained_dofs.csv")
     eigendata_csv = os.path.join(modal_dir, f"{prefix}_eigendata.csv")
@@ -314,16 +446,26 @@ def _build_face_displacements_from_beam(
         if not os.path.isfile(p):
             raise FileNotFoundError(p)
 
-    R = _beam_to_global_rotation_from_cfg(cfg)
     beam_pos_raw = _load_beam_positions(nodes_csv)
+    R = _hydro_alignment_rotation(
+        cfg,
+        align_beam_to_hydro_mesh=align_beam_to_hydro_mesh,
+        beam_pos_raw=beam_pos_raw,
+    )
     constrained = _constrained_global_dofs(constrained_csv)
     n_nodes = int(beam_pos_raw.shape[0])
 
-    if align_beam_to_hydro_mesh and not np.allclose(R, np.eye(3), atol=1e-12, rtol=0.0):
+    if not np.allclose(R, np.eye(3), atol=1e-12, rtol=0.0):
         beam_pos = np.einsum("ij,nj->ni", R, beam_pos_raw)
         print(
-            "[beam→mesh] Rotated beam node positions with R = R_x(pitch) R_y(α) R_y(Γ) "
+            "[beam→mesh] Rotated beam node positions with R = R_x(Γ_x) R_y(α) R_y(Γ_y) "
             "(same as build_capytaine_mesh.py) so they lie in the hydro mesh frame."
+        )
+    elif align_beam_to_hydro_mesh and _beam_modal_csv_already_in_hydro_frame(cfg, beam_pos_raw):
+        beam_pos = np.asarray(beam_pos_raw, dtype=float).copy()
+        print(
+            "[beam→mesh] Beam CSV already in hydro mesh frame (dihedral_rotate_beam=True); "
+            "skipping duplicate R_x(Γ_x) R_y(α) R_y(Γ_y)."
         )
     else:
         beam_pos = np.asarray(beam_pos_raw, dtype=float).copy()
@@ -336,20 +478,49 @@ def _build_face_displacements_from_beam(
         span_axis_eff = int(span_axis)
         print(f"[beam→mesh] span_axis fixed={span_axis_eff} (capytaine_modal_span_axis or --span-axis).")
 
+    norm_mode = str(phi_normalization or getattr(cfg, "capytaine_phi_normalization", "geometric"))
+
     disp_all = []
     mode_names = []
+    scale_factors: list[float] = []
     for mode_idx in mode_indices:
         phi = _load_phi_full_row(eigendata_csv, n_nodes, constrained, mode_idx)
-        phi_max = float(np.max(np.abs(phi)))
-        if normalize_phi and phi_max > 0.0 and np.isfinite(phi_max):
-            phi = phi / phi_max
-        if align_beam_to_hydro_mesh and not np.allclose(R, np.eye(3), atol=1e-12, rtol=0.0):
+        scale = 1.0
+        if normalize_phi:
+            scale = _phi_normalization_scale(phi, norm_mode)
+            scale_all = float(np.max(np.abs(phi)))
+            scale_tr = _phi_normalization_scale(phi, "translation")
+            if (
+                norm_mode in ("translation", "trans", "disp", "u")
+                and scale_tr > 0.0
+                and scale_all > 5.0 * scale_tr
+            ):
+                print(
+                    f"[beam→mesh] mode_{mode_idx + 1}: max|phi|_6dof={scale_all:.4g} "
+                    f"but max|translation|={scale_tr:.4g}; 'translation' normalization "
+                    f"inflates hull motion by ~{scale_all / scale_tr:.2g}× "
+                    f"(added mass ~{(scale_all / scale_tr) ** 2:.2g}× too large). "
+                    f"Prefer capytaine_phi_normalization='geometric'."
+                )
+            phi = phi / scale
+            print(
+                f"[beam→mesh] mode_{mode_idx + 1}: phi_bem_scale={scale:.6g} "
+                f"(max|phi| before {norm_mode!r} normalize → max|phi|=1 for Capytaine)"
+            )
+        scale_factors.append(scale)
+        if not np.allclose(R, np.eye(3), atol=1e-12, rtol=0.0):
             phi = _rotate_nodal_phi_to_hydro_frame(phi, n_nodes, R)
-        d = _compute_displacements(face_centers, beam_pos, phi, span_axis=span_axis_eff)
+        d = _compute_displacements(face_centers, beam_pos, phi, span_axis=span_axis_eff,
+                                   torsion_sign=float(getattr(cfg, "bem_torsion_sign", 1.0)))
         disp_all.append(disp_scale * d)
         mode_names.append(f"mode_{mode_idx + 1}")
 
-    return mode_names, np.asarray(disp_all, dtype=float), span_axis_eff
+    return (
+        mode_names,
+        np.asarray(disp_all, dtype=float),
+        span_axis_eff,
+        np.asarray(scale_factors, dtype=float),
+    )
 
 
 def _save_csv_matrix(path: str, omega: np.ndarray, names: list[str], mat: np.ndarray) -> None:
@@ -976,14 +1147,14 @@ def _parse_mode_indices(text: str) -> list[int]:
 
 def _mode_indices_from_config(cfg) -> list[int]:
     """
-    First ``num_modes_flutter_egv`` dry modes (0-based rows in ``*_eigendata.csv``).
+    First ``num_modes_egv`` dry modes (0-based rows in ``*_eigendata.csv``).
 
     Matches the modal basis used by ``main.py`` / ``flutter_solver`` when
-    ``modes_to_analyze`` is the default ``list(range(num_modes_flutter_egv))``.
+    ``modes_to_analyze`` (tracked branches) is a subset of the full dry/modal basis.
     """
-    n = int(getattr(cfg, "num_modes_flutter_egv", 1))
+    n = int(getattr(cfg, "num_modes_egv", 1))
     if n < 1:
-        raise ValueError(f"num_modes_flutter_egv must be >= 1, got {n}")
+        raise ValueError(f"num_modes_egv must be >= 1, got {n}")
     return list(range(n))
 
 
@@ -1038,6 +1209,30 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Compute modal radiation A(omega), B(omega) with Capytaine.")
     parser.add_argument("--case-name", "--case_name", dest="case_name", type=str, required=True, help="Case config name under examples/<case-name>.")
     parser.add_argument(
+        "--mesh-path",
+        type=str,
+        default="",
+        help="Override case mesh_path (e.g. mesh-convergence study VTU).",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=str,
+        default="",
+        help="Override capytaine_results_dir for this run (e.g. mesh-convergence study).",
+    )
+    parser.add_argument(
+        "--modal-dir",
+        type=str,
+        default="",
+        help="Override cfg.modal_dir for beam→mesh face mapping (dry modal CSV folder).",
+    )
+    parser.add_argument(
+        "--prefix",
+        type=str,
+        default="",
+        help="Override cfg.prefix for *_eigendata.csv / *_nodes.csv filenames.",
+    )
+    parser.add_argument(
         "--rigid-body",
         action="store_true",
         help="Use six rigid-body DOFs (Surge…Yaw). Incompatible with --modes; can also set cfg.rigid_body_motion.",
@@ -1048,13 +1243,25 @@ def main(argv: Iterable[str] | None = None) -> None:
         type=str,
         default="",
         help="Optional comma-separated 0-based row indices into *_eigendata.csv "
-        "(default: 0..num_modes_flutter_egv-1 from case config).",
+        "(default: 0..num_modes_egv-1 from case config).",
     )
-    parser.add_argument("--span-axis", type=int, default=1, help="Beam span axis (0=X, 1=Y, 2=Z).")
+    parser.add_argument(
+        "--span-axis",
+        type=int,
+        default=None,
+        help="Beam span axis (0=X, 1=Y, 2=Z). Default: config.beam_span_axis or infer from beam nodes.",
+    )
     parser.add_argument(
         "--raw-eigenvector",
         action="store_true",
-        help="Use raw mass-normalized eigenvectors (default rescales each mode by max|phi|=1).",
+        help="Skip eigenvector rescaling before face mapping (same as --phi-normalization none).",
+    )
+    parser.add_argument(
+        "--phi-normalization",
+        type=str,
+        default="",
+        help="Eigenvector scale before face map: geometric (default, max|phi|→1 + scale² on A,B), "
+        "translation (max|U|→1), none (legacy mass-normalized phi).",
     )
     parser.add_argument(
         "--disp-scale",
@@ -1089,7 +1296,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         "--skip-hydro-beam-alignment",
         action="store_true",
         help="Beam-mapped modal runs only: do not rotate beam node positions / eigenvectors into the "
-        "hydro mesh frame (disables matching build_capytaine_mesh pitch, α, Γ). For legacy debugging only.",
+        "hydro mesh frame (disables matching build_capytaine_mesh dihedral, α, wing dihedral). For legacy debugging only.",
     )
     parser.add_argument(
         "--plot-mode-projection-debug",
@@ -1136,19 +1343,39 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     defaults = _defaults_from_config(cfg, args.case_name)
 
-    mesh_path = getattr(cfg, "mesh_path", defaults["mesh"])
-    modal_dir = getattr(cfg, "modal_dir", defaults["modal_dir"])
-    prefix = getattr(cfg, "prefix", defaults["prefix"])
-    out_dir = getattr(cfg, "capytaine_results_dir", defaults["out_dir"])
+    mesh_path = str(args.mesh_path).strip() or getattr(cfg, "mesh_path", defaults["mesh"])
+    modal_dir = str(args.modal_dir).strip() or getattr(cfg, "modal_dir", defaults["modal_dir"])
+    prefix = str(args.prefix).strip() or getattr(cfg, "prefix", defaults["prefix"])
+    out_dir = str(args.out_dir).strip() or getattr(cfg, "capytaine_results_dir", defaults["out_dir"])
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
     rho = float(args.rho) if args.rho is not None else float(defaults["rho"])
     water_depth_cfg = getattr(cfg, "water_depth", defaults["water_depth"])
     water_depth = np.inf if str(water_depth_cfg).lower() == "inf" else float(water_depth_cfg)
     free_surface_cfg = getattr(cfg, "free_surface_elevation", defaults["free_surface_elevation"])
+    # ``free_surface`` is the waterline elevation in the structural/beam frame (the mesh is
+    # stored co-located with the beam).  Capytaine only accepts a free surface at z=0, so for
+    # a finite (surface-piercing) waterline we lift the mesh by ``fs_shift`` to bring the
+    # waterline to z=0 for the BEM solve, pass ``free_surface_cpt=0`` to Capytaine, and undo
+    # the lift on the face centres used for the beam mapping.
     free_surface = _parse_free_surface(free_surface_cfg)
+    if np.isinf(free_surface):
+        fs_shift = 0.0
+        free_surface_cpt = np.inf
+    else:
+        fs_shift = -float(free_surface)
+        free_surface_cpt = 0.0
     depth_values = _parse_depth_values(defaults["depth"], args.depth)
     omega = _parse_omega_args(args, cfg)
+
+    phi_norm_mode = (
+        str(args.phi_normalization).strip()
+        or str(getattr(cfg, "capytaine_phi_normalization", "geometric")).strip()
+        or "geometric"
+    )
+    if args.raw_eigenvector:
+        phi_norm_mode = "none"
+    normalize_phi = phi_norm_mode.lower() not in ("none", "raw", "off", "false", "0")
 
     if args.show_mode_projection_debug:
         import matplotlib
@@ -1173,38 +1400,46 @@ def main(argv: Iterable[str] | None = None) -> None:
     print(f"Case: {args.case_name}")
     print(f"Radiation basis: {'rigid body (6 DOF)' if rigid_body_motion else 'modal / custom face DOFs'}")
     if not rigid_body_motion and not args.modes:
+        n_modal = int(getattr(cfg, "num_modes_egv", 1))
         n_flutter = int(getattr(cfg, "num_modes_flutter_egv", 1))
         mta = getattr(cfg, "modes_to_analyze", None)
         if mta is not None and list(mta) != list(range(n_flutter)):
             print(
                 f"Note: cfg.modes_to_analyze={list(mta)} differs from "
                 f"range(num_modes_flutter_egv)={list(range(n_flutter))}; "
-                "beam-mapped radiation uses num_modes_flutter_egv unless --mode-indices is set."
+                "beam-mapped radiation uses num_modes_egv unless --mode-indices is set."
             )
         print(
-            f"Modal radiation modes: num_modes_flutter_egv={n_flutter} "
+            f"Modal radiation modes: num_modes_egv={n_modal} "
             f"-> CSV row indices {defaults['mode_indices']}"
         )
     print(f"Depth sweep: {depth_values}")
     print(
         "Free surface: "
-        + ("disabled (inf)" if np.isinf(free_surface) else f"z={free_surface:.6g} m")
+        + ("disabled (inf)" if np.isinf(free_surface) else f"z={free_surface:.6g} m (beam frame)")
+        + (f"; mesh lifted by {fs_shift:+.6g} m so waterline → z=0 for the BEM solve" if abs(fs_shift) > 1e-15 else "")
     )
     print(f"Omega samples: {omega.size} from {omega.min():.6g} to {omega.max():.6g} rad/s")
+    if not rigid_body_motion:
+        print(
+            f"Eigenvector normalization for face map: {phi_norm_mode!r} "
+            f"({'active' if normalize_phi else 'disabled'})"
+        )
 
-    _msax = getattr(cfg, "capytaine_modal_span_axis", None)
-    if args.case_name == "ABRAMSON1965" and (not rigid_body_motion) and (not args.modes):
-        span_axis_modal = int(_msax) if _msax is not None else None
-    else:
-        span_axis_modal = int(_msax) if _msax is not None else int(args.span_axis)
+    span_axis_modal = (
+        _resolve_modal_span_axis(cfg, args.span_axis)
+        if (not rigid_body_motion) and (not args.modes)
+        else args.span_axis
+    )
 
-    span_axis_used_modal = int(args.span_axis)
+    span_axis_used_modal = -1
 
     all_A: list[np.ndarray] = []
     all_B: list[np.ndarray] = []
     all_A_beam: list[np.ndarray] = []
     all_B_beam: list[np.ndarray] = []
     mode_names_ref: list[str] | None = None
+    phi_bem_scale_factors: np.ndarray | None = None
 
     R_beam_to_global = _beam_to_global_rotation_from_cfg(cfg)
     rigid_use_beam_local = (
@@ -1214,13 +1449,13 @@ def main(argv: Iterable[str] | None = None) -> None:
     if rigid_use_beam_local:
         print(
             "Rigid-body results will also be written in the beam-aligned frame "
-            "(A_loc = T^T A T, T=blkdiag(R,R), R = R_x(pitch) R_y(α) R_y(Γ) as in build_capytaine_mesh.py)."
+            "(A_loc = T^T A T, T=blkdiag(R,R), R = R_x(Γ_x) R_y(α) R_y(Γ_y) as in build_capytaine_mesh.py)."
         )
 
     for idepth, depth in enumerate(depth_values):
         print(f"\n--- Solving depth = {depth:g} m ---")
         mesh = _resolve_mesh_loader(cpt, mesh_path)
-        _translate_mesh_z(mesh, -depth)
+        _translate_mesh_z(mesh, -depth + fs_shift)
         body = _build_floating_body(cpt, mesh, name=f"modal_body_d{idepth}")
         face_disp: np.ndarray | None = None
 
@@ -1243,19 +1478,20 @@ def main(argv: Iterable[str] | None = None) -> None:
             )
         else:
             # ── Face centres must be in the UNDEFORMED structural frame ───────────
-            # body.mesh has already been translated downward by `depth` via
-            # _translate_mesh_z(mesh, -depth).  The beam node positions loaded from
-            # CSV (and possibly R-rotated into the hydro frame) are NOT depth-
-            # translated, so we must undo the z-shift here.  This matters only for
-            # the beam-mapped path below; the pre-computed NPZ path ignores
-            # face_centers entirely.
+            # body.mesh has been translated by `-depth + fs_shift` via _translate_mesh_z.
+            # The beam node positions loaded from CSV (and possibly R-rotated into the hydro
+            # frame) are NOT translated, so we undo both the depth sink and the free-surface
+            # lift here.  This matters only for the beam-mapped path below; the pre-computed
+            # NPZ path ignores face_centers entirely.
             face_centers = np.asarray(body.mesh.faces_centers, dtype=float).copy()
-            if depth != 0.0:
-                face_centers[:, 2] += depth  # restore pre-translation z
+            z_restore = depth - fs_shift
+            if z_restore != 0.0:
+                face_centers[:, 2] += z_restore  # restore pre-translation (beam-frame) z
 
             if args.modes:
                 mode_names, face_disp = _load_modal_displacements(args.modes)
                 span_axis_used_modal = -1
+                phi_bem_scale_factors = None
             else:
                 if args.mode_indices:
                     mode_indices = _parse_mode_indices(args.mode_indices)
@@ -1263,27 +1499,30 @@ def main(argv: Iterable[str] | None = None) -> None:
                     mode_indices = _mode_indices_from_config(cfg)
                 if not mode_indices:
                     raise ValueError(
-                        "No mode indices defined. Set cfg.num_modes_flutter_egv >= 1 or pass --mode-indices."
+                        "No mode indices defined. Set cfg.num_modes_egv >= 1 or pass --mode-indices."
                     )
                 eigendata_csv = os.path.join(modal_dir, f"{prefix}_eigendata.csv")
                 n_csv = _count_eigendata_mode_rows(eigendata_csv)
                 if n_csv < len(mode_indices):
                     raise ValueError(
-                        f"{eigendata_csv} has {n_csv} mode row(s), but num_modes_flutter_egv="
+                        f"{eigendata_csv} has {n_csv} mode row(s), but num_modes_egv="
                         f"{len(mode_indices)} requires at least that many. "
                         f"Re-run dry analysis with num_modes_egv >= {len(mode_indices)} "
-                        "or lower num_modes_flutter_egv in the case config."
+                        "or lower num_modes_egv in the case config."
                     )
-                mode_names, face_disp, span_axis_used_modal = _build_face_displacements_from_beam(
-                    face_centers=face_centers,
-                    modal_dir=modal_dir,
-                    prefix=prefix,
-                    mode_indices=mode_indices,
-                    span_axis=span_axis_modal,
-                    normalize_phi=not bool(args.raw_eigenvector),
-                    disp_scale=float(args.disp_scale),
-                    cfg=cfg,
-                    align_beam_to_hydro_mesh=not bool(args.skip_hydro_beam_alignment),
+                mode_names, face_disp, span_axis_used_modal, phi_bem_scale_factors = (
+                    _build_face_displacements_from_beam(
+                        face_centers=face_centers,
+                        modal_dir=modal_dir,
+                        prefix=prefix,
+                        mode_indices=mode_indices,
+                        span_axis=span_axis_modal,
+                        normalize_phi=normalize_phi,
+                        disp_scale=float(args.disp_scale),
+                        cfg=cfg,
+                        align_beam_to_hydro_mesh=not bool(args.skip_hydro_beam_alignment),
+                        phi_normalization=phi_norm_mode,
+                    )
                 )
 
             assert face_disp is not None
@@ -1318,13 +1557,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             raise ValueError("Mode names changed across depth sweep; expected identical modal basis.")
 
         print(f"Loaded mesh faces: {body.mesh.nb_faces}")
-        print(f"Mesh z-translation applied: {-depth:.6g} m")
+        print(f"Mesh z-translation applied: {-depth + fs_shift:.6g} m (=-depth {fs_shift:+.6g} free-surface lift)")
         if not args.no_debug_geometry_plot:
             suffix = f"_depth_{depth:g}".replace(".", "p").replace("-", "m")
             dbg_path = os.path.join(out_dir, f"debug_mesh_free_surface{suffix}.png")
             _plot_mesh_free_surface_debug(
                 mesh=body.mesh,
-                free_surface=free_surface,
+                free_surface=free_surface_cpt,
                 water_depth=water_depth,
                 out_path=dbg_path,
                 show=bool(args.show_debug_geometry),
@@ -1342,15 +1581,54 @@ def main(argv: Iterable[str] | None = None) -> None:
                         omega=float(w),
                         rho=rho,
                         water_depth=water_depth,
-                        free_surface=free_surface,
+                        free_surface=free_surface_cpt,
                     )
                 )
 
         print(f"Solving {len(problems)} radiation problems...")
         results = solver.solve_all(problems)
-        ds = cpt.assemble_dataset(results)
-        A = _as_mode_matrix(ds, "added_mass", omega, mode_names)
-        B = _as_mode_matrix(ds, "radiation_damping", omega, mode_names)
+        # Capytaine scarta i casi SENZA superficie libera in assemble_dataset
+        # ("Datasets only support cases with a free surface", capytaine#88).
+        # Per il TEST G (T1.6, dominio illimitato) raccogliamo A e B direttamente
+        # dai result objects, che il solver calcola comunque.
+        if np.isinf(free_surface_cpt):
+            print("[Capytaine] free_surface=inf: raccolta diretta dai result "
+                  "(assemble_dataset li ignorerebbe)")
+            nm_ = len(mode_names); nw_ = len(omega)
+            A = np.zeros((nw_, nm_, nm_)); B = np.zeros((nw_, nm_, nm_))
+            _wi = {float(w): i for i, w in enumerate(omega)}
+            _mi = {str(m): i for i, m in enumerate(mode_names)}
+            for r in results:
+                i = _wi.get(float(r.omega))
+                j = _mi.get(str(r.radiating_dof))
+                if i is None or j is None:
+                    continue
+                for dof, val in r.added_mass.items():
+                    k = _mi.get(str(dof))
+                    if k is not None:
+                        A[i, k, j] = float(val)
+                for dof, val in r.radiation_damping.items():
+                    k = _mi.get(str(dof))
+                    if k is not None:
+                        B[i, k, j] = float(val)
+        else:
+            ds = cpt.assemble_dataset(results)
+            A = _as_mode_matrix(ds, "added_mass", omega, mode_names)
+            B = _as_mode_matrix(ds, "radiation_damping", omega, mode_names)
+
+        if (
+            not rigid_body_motion
+            and phi_bem_scale_factors is not None
+            and normalize_phi
+            and np.any(np.asarray(phi_bem_scale_factors) != 1.0)
+        ):
+            s = np.asarray(phi_bem_scale_factors, dtype=float)
+            print(
+                "[Capytaine] Converting A,B from geometric BEM basis (max|phi|=1) to "
+                f"mass-normalized modal basis (phi_bem_scale_factors={np.round(s, 6).tolist()})"
+            )
+            A = _bem_modal_matrices_to_mass_basis(A, s)
+            B = _bem_modal_matrices_to_mass_basis(B, s)
 
         all_A.append(A)
         all_B.append(B)
@@ -1370,7 +1648,9 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         # Save per-depth files.
         suffix = f"_depth_{depth:g}".replace(".", "p").replace("-", "m")
-        npz_path = os.path.join(out_dir, f"modal_radiation_AB{suffix}.npz")
+        npz_path = os.path.join(out_dir, f"modal_radiation_rigid_AB{suffix}.npz")
+        if not rigid_body_motion:
+            npz_path = os.path.join(out_dir, f"modal_radiation_AB{suffix}.npz")
         meta: dict = {
             "rho": rho,
             "water_depth": float(water_depth) if np.isfinite(water_depth) else np.inf,
@@ -1393,9 +1673,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             meta["rigid_body_rotation_reference"] = (
                 np.asarray(com, dtype=float) if com is not None else _mesh_area_centroid(body.mesh)
             )
-            meta["pitch_deg_cfg"] = float(getattr(cfg, "pitch", 0.0))
-            meta["alpha_deg_cfg"] = float(getattr(cfg, "alpha_deg", 0.0))
             meta["dihedral_deg_cfg"] = float(getattr(cfg, "dihedral_angle", 0.0))
+            meta["wing_dihedral_deg_cfg"] = float(getattr(cfg, "wing_dihedral_angle", 0.0))
+            meta["alpha_deg_cfg"] = float(getattr(cfg, "alpha_deg", 0.0))
             meta["R_beam_to_global"] = R_beam_to_global.astype(float)
             if A_beam is not None and B_beam is not None:
                 meta["added_mass_beam_local"] = A_beam
@@ -1410,6 +1690,31 @@ def main(argv: Iterable[str] | None = None) -> None:
             meta["modal_dir"] = os.path.abspath(modal_dir) if modal_dir else ""
             meta["modal_prefix"] = prefix
             meta["face_displacements"] = face_disp
+            meta["phi_bem_normalization"] = phi_norm_mode
+            if phi_bem_scale_factors is not None:
+                meta["phi_bem_scale_factors"] = np.asarray(phi_bem_scale_factors, dtype=float)
+                meta["added_mass_modal_basis"] = (
+                    "mass_normalized"
+                    if normalize_phi and np.any(np.asarray(phi_bem_scale_factors) != 1.0)
+                    else "bem_input"
+                )
+            if not args.modes:
+                from capytaine_workflow import collect_source_inputs_from_modal_csv
+
+                mode_idx_used = (
+                    _parse_mode_indices(args.mode_indices)
+                    if args.mode_indices
+                    else _mode_indices_from_config(cfg)
+                )
+                meta.update(
+                    collect_source_inputs_from_modal_csv(
+                        cfg,
+                        modal_dir=modal_dir,
+                        prefix=prefix,
+                        mode_indices=mode_idx_used,
+                        face_displacements=face_disp,
+                    )
+                )
 
         save_modal_radiation_npz(
             path=npz_path,
@@ -1447,7 +1752,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     A_beam,
                     title=(
                         f"{basis} added mass A(omega) beam-local frame depth={depth:g} m "
-                        "(same DOF labels; axes = chord/span/thickness after pitch, α, Γ)"
+                        "(same DOF labels; axes = chord/span/thickness after dihedral, α, wing dihedral)"
                     ),
                     y_label="A_ik [kg]",
                     out_path=os.path.join(out_dir, f"added_mass_vs_omega_beam_local{suffix}.png"),
@@ -1459,7 +1764,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     B_beam,
                     title=(
                         f"{basis} radiation damping B(omega) beam-local frame depth={depth:g} m "
-                        "(same DOF labels; axes = chord/span/thickness after pitch, α, Γ)"
+                        "(same DOF labels; axes = chord/span/thickness after dihedral, α, wing dihedral)"
                     ),
                     y_label="B_ik [kg/s]",
                     out_path=os.path.join(out_dir, f"radiation_damping_vs_omega_beam_local{suffix}.png"),
@@ -1489,9 +1794,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             "capytaine_modal_span_axis_used": int(span_axis_used_modal),
         }
         if rigid_body_motion:
-            meta_agg["pitch_deg_cfg"] = float(getattr(cfg, "pitch", 0.0))
-            meta_agg["alpha_deg_cfg"] = float(getattr(cfg, "alpha_deg", 0.0))
             meta_agg["dihedral_deg_cfg"] = float(getattr(cfg, "dihedral_angle", 0.0))
+            meta_agg["wing_dihedral_deg_cfg"] = float(getattr(cfg, "wing_dihedral_angle", 0.0))
+            meta_agg["alpha_deg_cfg"] = float(getattr(cfg, "alpha_deg", 0.0))
             meta_agg["R_beam_to_global"] = R_beam_to_global.astype(float)
         if len(all_A_beam) == 1 and len(all_B_beam) == 1:
             meta_agg["added_mass_beam_local"] = all_A_beam[0]

@@ -17,24 +17,54 @@ class PkDiagnostics:
 
     def __init__(self):
         self.contributions_history = []
+        self.qmodal_iteration_history = []
         self.w_modal_history = []
         self.converged_wet_spectrum_history = []
+        self.mac_convergence_history = []
         self.mode_switch_warnings = 0
         self.convergence_issues = 0
         self.extrapolation_failures = 0
         self.iteration_log = []
+        # Opt-in: raw (unfiltered) (vals_all, vecs_all) at every build_matrix_fn
+        # evaluation, keyed loosely by (V, k) -- for independent MAC-based mode
+        # identification in post-processing, bypassing the per-mode selector
+        # entirely (diagnostic only; off by default, no effect on tracking).
+        self.capture_full_spectrum = False
+        self.full_spectrum_log = []
+        # Non-oscillatory (real, growing) eigenvalues seen anywhere in the raw
+        # spectrum during the sweep -- a divergence-type instability, distinct
+        # from flutter. The oscillatory-only V-g/V-f bookkeeping is structurally
+        # blind to these (they carry omega=0, never match any frequency-window
+        # selector), so without this they are silently dropped even though the
+        # coupled system genuinely goes unstable (2026-09-04, GOLAND_water:
+        # real eigenvalues +20.86/+17.88 1/s at V=2.53 m/s, k=17.76, well inside
+        # the valid GAF table range -- not an extrapolation artifact).
+        self.real_instability_events = []
+        self._real_instab_warned_keys = set()
 
 
-def initial_k_for_mode(s, V, results_for_V, omega_n, k_guess, fXK0=0.618):
+def initial_k_for_mode(s, V, results_for_V, omega_n, k_guess, fXK0=0.618, own_prev_omega=None):
     """
     Hybrid reduced-frequency initial guess (Yuan & Zhang 2023, Eq. 13–15).
 
     Uses the converged frequency of mode ``s-1`` at the current airspeed, optionally
     blended with mode ``s-2`` — not a sorted eigenvalue from the current spectrum.
+
+    ``own_prev_omega``, when given (mode ``s``'s own converged ω from the
+    previous velocity step), takes priority over both the s-1 inheritance and
+    the dry-frequency fallback: a mode already has an established trajectory
+    at that point, and reseeding from a neighbour or the dry frequency can
+    point the trial-k evaluation at a region of the spectrum with no
+    oscillatory root at all, dropping an already-converging branch (2026-09-03,
+    GOLAND_water torsion: lost at the first velocity step after 7 converged
+    steps, because the s-1/dry fallback ignored its own history).
     """
     V = max(float(V), 1e-12)
     if s == 0:
         return max(float(k_guess), 1e-6)
+
+    if own_prev_omega is not None and np.isfinite(own_prev_omega) and float(own_prev_omega) > 0.0:
+        return max(float(own_prev_omega) / V, 1e-6)
 
     if len(results_for_V) < s:
         return max(float(omega_n[s]) / V, float(k_guess), 1e-6)
@@ -42,6 +72,23 @@ def initial_k_for_mode(s, V, results_for_V, omega_n, k_guess, fXK0=0.618):
     om_ssm1 = results_for_V[s - 1].get("omega", np.nan)
     if not np.isfinite(om_ssm1) or om_ssm1 <= 0.0:
         return max(float(omega_n[s]) / V, float(k_guess), 1e-6)
+
+    # The s-1 inheritance assumes neighbouring modes are close in frequency
+    # (Yuan & Zhang's own worked examples). When the dry structural spacing
+    # says otherwise -- e.g. first bending vs. first torsion, often >2x apart --
+    # seeding k from mode s-1 evaluates the hydro/aero operators nowhere near
+    # mode s's own resonance; with large added mass/damping (water) that can
+    # leave mode s overdamped (no oscillatory wet root) at that trial k, so it
+    # is never found. Fall back to mode s's own structural frequency instead.
+    if s < len(omega_n) and omega_n[s] > 0.0:
+        ratio = float(om_ssm1) / float(omega_n[s])
+        if ratio < 0.5 or ratio > 2.0:
+            print(
+                f"      initial_k_for_mode: ω_{{s-1}}^conv={om_ssm1:.3f} rad/s is "
+                f"{ratio:.2f}x ω_struct[{s}]={omega_n[s]:.3f} rad/s -- too far to "
+                f"inherit, seeding from mode {s}'s own structural frequency instead"
+            )
+            return max(float(omega_n[s]) / V, float(k_guess), 1e-6)
 
     k_ssm1 = float(om_ssm1) / V
     if s >= 2 and len(results_for_V) >= s - 1:
@@ -152,17 +199,28 @@ def normalize_and_fix_sign(u, M, reference=None):
     return u_norm
 
 
-def build_wet_spectrum_summary(vals, omega_n, results_for_V, freq_margin):
+def build_wet_spectrum_summary(vals, omega_n, results_for_V, freq_margin, *, omega_phys_min=None, vecs=None):
     """
     Classify sorted wet roots at PK convergence.
 
     Roots matched to a converged PK branch (``pk_tracked``) are excluded from
     ``untracked``. The lowest-frequency untracked root is the usual orphan branch
     that never enters the structural mode-matching window.
+
+    ``vecs`` (optional) is a sequence aligned with ``vals`` holding the augmented-
+    state eigenvector of each root; when supplied it is attached under the ``vec``
+    key so untracked branches can be MAC-tracked / post-processed.
     """
     vals = np.asarray(vals, dtype=complex).ravel()
     omega_n = np.asarray(omega_n, dtype=float).ravel()
+    if vecs is not None and len(vecs) != vals.size:
+        vecs = None
     margin = float(freq_margin)
+    if omega_phys_min is None:
+        from . import mode_matching
+        omega_phys_min = mode_matching.physical_omega_min(omega_n)
+    else:
+        omega_phys_min = float(omega_phys_min)
 
     tracked_omegas = []
     for md in results_for_V:
@@ -175,7 +233,7 @@ def build_wet_spectrum_summary(vals, omega_n, results_for_V, freq_margin):
     roots = []
     for idx, lam in enumerate(vals):
         omega = float(np.abs(np.imag(lam)))
-        if omega < 1e-8:
+        if omega < omega_phys_min:
             continue
         sigma = float(np.real(lam))
         gamma = sigma / omega if omega > 1e-6 else 0.0
@@ -199,17 +257,18 @@ def build_wet_spectrum_summary(vals, omega_n, results_for_V, freq_margin):
         else:
             kind = "untracked"
 
-        roots.append(
-            {
-                "index": int(idx),
-                "p": complex(lam),
-                "omega": omega,
-                "sigma": sigma,
-                "gamma": float(gamma),
-                "kind": kind,
-                "structural_near_mode": struct_near,
-            }
-        )
+        root = {
+            "index": int(idx),
+            "p": complex(lam),
+            "omega": omega,
+            "sigma": sigma,
+            "gamma": float(gamma),
+            "kind": kind,
+            "structural_near_mode": struct_near,
+        }
+        if vecs is not None and vecs[idx] is not None:
+            root["vec"] = np.asarray(vecs[idx], dtype=complex).ravel()
+        roots.append(root)
 
     untracked = [r for r in roots if r["kind"] == "untracked"]
     lowest_untracked = min(untracked, key=lambda r: r["omega"]) if untracked else None
@@ -223,6 +282,73 @@ def build_wet_spectrum_summary(vals, omega_n, results_for_V, freq_margin):
         "omega_structural": [float(w) for w in omega_n],
         "freq_margin": margin,
     }
+
+
+def merge_pk_wet_spectrum_vals(modes_list, *, return_vecs=False):
+    """
+    Union of wet eigenvalues from all converged PK modes at one airspeed.
+
+    Each mode is solved at its own k; merging yields a unified spectrum for
+    untracked-root diagnostics that includes every physical branch.
+
+    When ``return_vecs=True`` the corresponding augmented-state eigenvectors are
+    returned alongside the eigenvalues (``md['vecs'][:, i]`` is aligned with
+    ``md['wet_vals_all'][i]``). The returned vectors are a list (one entry per
+    kept eigenvalue) so downstream code can MAC-track the untracked branches.
+    """
+    merged = []
+    merged_vecs = []
+    for md in modes_list or []:
+        if not md.get("converged", False):
+            continue
+        wet_vals = md.get("wet_vals_all")
+        vecs = md.get("vecs")
+        if wet_vals is None:
+            wet_vals = md.get("wet_evals_first3")
+            vecs = md.get("wet_evecs_first3")
+        if wet_vals is None:
+            continue
+        wet_vals = np.asarray(wet_vals, dtype=complex).ravel()
+        vec_ok = (
+            vecs is not None
+            and np.ndim(vecs) == 2
+            and np.asarray(vecs).shape[1] >= wet_vals.size
+        )
+        for i, lam in enumerate(wet_vals):
+            if np.isfinite(np.abs(lam)):
+                merged.append(complex(lam))
+                merged_vecs.append(
+                    np.asarray(vecs)[:, i].copy() if vec_ok else None
+                )
+    if not merged:
+        return (None, None) if return_vecs else None
+    merged = np.asarray(merged, dtype=complex)
+    om = np.abs(np.imag(merged))
+    order = np.argsort(om)
+    merged = merged[order]
+    merged_vecs = [merged_vecs[k] for k in order]
+    om = om[order]
+    keep = [0]
+    for i in range(1, len(merged)):
+        if abs(om[i] - om[keep[-1]]) > 0.02 * max(om[i], om[keep[-1]], 1.0):
+            keep.append(i)
+    keep = np.asarray(keep, dtype=int)
+    merged = merged[keep]
+    merged_vecs = [merged_vecs[k] for k in keep]
+    if return_vecs:
+        return merged, merged_vecs
+    return merged
+
+
+def pk_wet_spectrum_for_velocity(modes_list, omega_n, freq_margin, *, omega_phys_min=None):
+    """Classified wet spectrum from merged PK eigenvalues at one V."""
+    wet_vals, wet_vecs = merge_pk_wet_spectrum_vals(modes_list, return_vecs=True)
+    if wet_vals is None:
+        return None
+    return build_wet_spectrum_summary(
+        wet_vals, omega_n, modes_list, freq_margin,
+        omega_phys_min=omega_phys_min, vecs=wet_vecs,
+    )
 
 
 def pk_solve_at_velocity(
@@ -257,6 +383,14 @@ def pk_solve_at_velocity(
     skip_inter_mode_on_perfect_mac=False,
     use_k_guess_each_iter=False,
     min_root_sep_rad=1.0,
+    omega_phys_min_frac=0.45,
+    tracking_policy="paper",
+    mac_reference="previous_velocity",
+    freq_jump_terminate_frac=None,
+    mac_terminate_floor=0.5,
+    track_seed_omegas=None,
+    min_pk_iter=1,
+    pk_discrete_dt=None,
 ):
     """
     Single-airspeed p-k solve for all modes in ``modes``.
@@ -290,9 +424,32 @@ def pk_solve_at_velocity(
                     last_converged_omegas.append(omega_n[s])
 
     print(f"\n  Solving at V = {V:.2f} m/s (fXK0={fXK0}, fRLX={fRLX})")
+    from . import mode_matching
+    omega_phys_min = mode_matching.physical_omega_min(omega_n, frac=omega_phys_min_frac)
 
     for s in modes:
         print(f"\n  === MODE {s} ===")
+
+        # First-velocity seed frequency for this branch. Defaults to the dry
+        # natural frequency ω_n[s]; an optional ``track_seed_omegas`` override
+        # lets the caller seed on the *wet* frequency instead (e.g. when added
+        # mass moves a wet root far from its dry value, so ω_n[s] would land
+        # closer to a neighbouring branch and mis-seed frequency continuity).
+        seed_omega_s = float(omega_n[s])
+        omega_n_for_s = omega_n
+        if track_seed_omegas is not None and s < len(track_seed_omegas):
+            _cand = float(track_seed_omegas[s])
+            if np.isfinite(_cand) and _cand > 0.0:
+                seed_omega_s = _cand
+                # Also override omega_n[s] wherever the s>0 first-lock machinery
+                # (initial_k_for_mode / select_pk_mode_initial_lock) reads the
+                # "structural" target for THIS slot -- otherwise those still
+                # centre on the dry ω_n[s], which for a strongly hybridised
+                # mode can sit far from every available wet root (see
+                # track_seed_omegas docstring above) and the search window /
+                # k-guess never reach the branch that actually carries it.
+                omega_n_for_s = np.array(omega_n, dtype=float, copy=True)
+                omega_n_for_s[s] = seed_omega_s
 
         if i > 0 and s < len(results[i - 1]["modes"]):
             prev_mode_data = results[i - 1]["modes"][s]
@@ -317,7 +474,19 @@ def pk_solve_at_velocity(
                 )
                 continue
 
-        if s == 0:
+        if tracking_policy == "frequency":
+            if i > 0 and s < len(results[i - 1]["modes"]):
+                om0 = results[i - 1]["modes"][s].get("omega", np.nan)
+            else:
+                om0 = seed_omega_s
+            if not np.isfinite(om0) or float(om0) <= 0.0:
+                om0 = seed_omega_s
+            k = max(float(om0) / max(float(V), 1e-12), 1e-4)
+            print(
+                f"    k_initial = {k:.6g} (frequency policy: ω/V from "
+                f"{'prev V' if i > 0 else 'seed'}={om0:.3f} rad/s)"
+            )
+        elif s == 0:
             if i == 0:
                 k = k_guess
                 print(f"    k_initial = {k:.6g} (from structural ω_n[0]={omega_n[0]:.3f} rad/s)")
@@ -325,11 +494,21 @@ def pk_solve_at_velocity(
                 k = k0_guess
                 print(f"    k_initial = {k:.6g} (from previous velocity step)")
         else:
-            k = initial_k_for_mode(s, V, results_for_V, omega_n, k_guess, fXK0)
-            om_ref = results_for_V[s - 1]["omega"] if len(results_for_V) >= s else omega_n[s - 1]
-            print(
-                f"    k_initial = {k:.6g} (Yuan & Zhang Eq. 15, ω_{{s-1}}^conv={om_ref:.3f} rad/s)"
-            )
+            own_prev_omega = None
+            if i > 0 and s < len(results[i - 1]["modes"]):
+                own_prev_omega = results[i - 1]["modes"][s].get("omega", None)
+            k = initial_k_for_mode(s, V, results_for_V, omega_n_for_s, k_guess, fXK0,
+                                    own_prev_omega=own_prev_omega)
+            if own_prev_omega is not None and np.isfinite(own_prev_omega) and own_prev_omega > 0.0:
+                print(
+                    f"    k_initial = {k:.6g} (own history: ω_{{{s}}}^conv(V_prev)="
+                    f"{own_prev_omega:.3f} rad/s)"
+                )
+            else:
+                om_ref = results_for_V[s - 1]["omega"] if len(results_for_V) >= s else omega_n[s - 1]
+                print(
+                    f"    k_initial = {k:.6g} (Yuan & Zhang Eq. 15, ω_{{s-1}}^conv={om_ref:.3f} rad/s)"
+                )
 
         p_ext = None
         omega_ext = None
@@ -361,6 +540,7 @@ def pk_solve_at_velocity(
             print(f"    p_for_Q_guess: structural ω_n[{s}]={omega_n[s]:.3f} rad/s (j=0)")
 
         prev_iter_vec = None
+        u_first_iter = None
         converged = False
         wet_mode_identified = False
 
@@ -373,6 +553,7 @@ def pk_solve_at_velocity(
         sigma_sel = float("nan")
         gamma_sel = float("nan")
         k_new = float("nan")
+        omega_track_v = None
 
         for j in range(max_iter):
             if j == 0 or j % 10 == 0:
@@ -391,9 +572,40 @@ def pk_solve_at_velocity(
 
             Ac = build_matrix_fn(k, V)
 
-            vals_all, vecs_all = eig(Ac)
+            mu_all, vecs_all = eig(Ac)
+            if pk_discrete_dt is not None:
+                from .newmark_discrete import discrete_poles_to_continuous
+                vals_all = discrete_poles_to_continuous(mu_all, pk_discrete_dt)
+            else:
+                vals_all = mu_all
 
-            if eigen_positive_imag_only:
+            if diagnostics is not None and getattr(diagnostics, "capture_full_spectrum", False):
+                diagnostics.full_spectrum_log.append({
+                    "V": float(V), "k": float(k), "mode": int(s), "iteration": int(j),
+                    "vals_all": vals_all.copy(), "vecs_all": vecs_all.copy(),
+                })
+
+            if diagnostics is not None:
+                _real_pos = np.where(
+                    (np.abs(np.imag(vals_all)) < 1e-6) & (np.real(vals_all) > 1e-6)
+                )[0]
+                if _real_pos.size > 0:
+                    _growth = np.real(vals_all[_real_pos])
+                    diagnostics.real_instability_events.append({
+                        "V": float(V), "mode_slot": int(s), "iteration": int(j),
+                        "k": float(k), "growth_rates": _growth.copy(),
+                    })
+                    _warn_key = (round(float(V), 6), int(s))
+                    if _warn_key not in diagnostics._real_instab_warned_keys:
+                        diagnostics._real_instab_warned_keys.add(_warn_key)
+                        print(
+                            f"      ⚠ NON-OSCILLATORY INSTABILITY: V={V:.3f} m/s, mode slot {s}, "
+                            f"k={k:.4f} -> {_real_pos.size} real eigenvalue(s), growth rate(s) "
+                            f"{np.array2string(_growth, precision=3)} 1/s (divergence-type; "
+                            f"omega=0, invisible to V-g/V-f frequency-window selection)"
+                        )
+
+            if eigen_positive_imag_only or tracking_policy == "frequency":
                 pos_idx = np.where(np.imag(vals_all) > 1e-8)[0]
             else:
                 imag = np.imag(vals_all)
@@ -448,7 +660,102 @@ def pk_solve_at_velocity(
             if prev_step_vec is None and i > 0 and s < len(results[i - 1]["modes"]):
                 prev_step_vec = results[i - 1]["modes"][s].get("u", None)
 
-            if j == 0 and (prev_iter_vec is None and prev_step_vec is None):
+            if tracking_policy == "frequency":
+                if omega_track_v is None:
+                    if i > 0 and s < len(results[i - 1]["modes"]):
+                        om_tr = results[i - 1]["modes"][s].get("omega", np.nan)
+                    else:
+                        om_tr = seed_omega_s
+                    if not np.isfinite(om_tr) or float(om_tr) <= 0.0:
+                        om_tr = seed_omega_s
+                    omega_track_v = float(om_tr)
+                prev_p_track = None
+                if i > 0 and s < len(results[i - 1]["modes"]):
+                    prev_p_track = results[i - 1]["modes"][s].get("p", None)
+                p_sel, u_sel, j_sel = mode_matching.select_pk_mode_frequency_continuity(
+                    vals,
+                    vecs,
+                    omegas,
+                    omega_track_v,
+                    prev_vec=prev_step_vec,
+                    prev_p=prev_p_track,
+                )
+                if p_sel is not None:
+                    print(
+                        f"      [frequency tracking] ω_track={omega_track_v:.3f} rad/s → "
+                        f"ω={np.abs(np.imag(p_sel)):.3f} rad/s (index {j_sel})"
+                    )
+
+                # Damping jump at coalescence: ω continuous but Re(p)/g hops to partner.
+                if (
+                    p_sel is not None
+                    and i > 0
+                    and prev_p_track is not None
+                    and np.isfinite(np.real(prev_p_track))
+                    and np.isfinite(np.real(p_sel))
+                ):
+                    g_prev = 2.0 * float(np.real(prev_p_track)) / max(
+                        float(np.abs(np.imag(prev_p_track))), 1e-12
+                    )
+                    g_new = 2.0 * float(np.real(p_sel)) / max(
+                        float(np.abs(np.imag(p_sel))), 1e-12
+                    )
+                    mac_prev = float("nan")
+                    if prev_step_vec is not None and u_sel is not None:
+                        mac_prev = float(mode_matching.compute_mac(u_sel, prev_step_vec))
+                    if abs(g_new - g_prev) > 0.5 and (
+                        not np.isfinite(mac_prev) or mac_prev < float(mac_terminate_floor)
+                    ):
+                        print(
+                            f"      ⊗ MODE {s} branch terminated: g jump "
+                            f"{g_prev:.3f} → {g_new:.3f} at coalescence "
+                            f"(MAC={mac_prev:.3f}); refusing partner-root hop."
+                        )
+                        p_sel, u_sel, j_sel = None, None, None
+
+                # ── Branch-termination guard (shape-gated) ───────────────────
+                # When a branch's oscillatory root vanishes (e.g. the bending
+                # mode goes overdamped/aperiodic), the nearest remaining root is
+                # a *different* mode far away in frequency. Frequency continuity
+                # would jump the branch onto it → a spurious discontinuity. If
+                # the nearest root lies more than ``freq_jump_terminate_frac``
+                # away from the tracked frequency AND its MAC to the branch's
+                # previous-velocity shape is below ``mac_terminate_floor`` (i.e.
+                # it is a different mode, not a fast-but-continuous shift), the
+                # branch is terminated instead of reassigned. Only active for
+                # i>0 (never on the very first, seeding, velocity step).
+                if (
+                    p_sel is not None
+                    and freq_jump_terminate_frac is not None
+                    and i > 0
+                    and np.isfinite(omega_track_v)
+                    and omega_track_v > 1e-6
+                ):
+                    om_pick = float(np.abs(np.imag(p_sel)))
+                    jump_frac = abs(om_pick - omega_track_v) / omega_track_v
+                    if jump_frac > float(freq_jump_terminate_frac):
+                        mac_prev = float("nan")
+                        if prev_step_vec is not None and u_sel is not None:
+                            mac_prev = float(
+                                mode_matching.compute_mac(u_sel, prev_step_vec)
+                            )
+                        shape_lost = (
+                            prev_step_vec is None
+                            or not np.isfinite(mac_prev)
+                            or mac_prev < float(mac_terminate_floor)
+                        )
+                        if shape_lost:
+                            print(
+                                f"      ⊗ MODE {s} branch terminated: nearest root "
+                                f"ω={om_pick:.3f} rad/s is {jump_frac * 100:.0f}% from "
+                                f"ω_track={omega_track_v:.3f} rad/s (MAC={mac_prev:.3f} "
+                                f"< {mac_terminate_floor}); oscillatory root vanished."
+                            )
+                            p_sel, u_sel, j_sel = None, None, None
+
+                wet_mode_identified = p_sel is not None
+
+            elif j == 0 and (prev_iter_vec is None and prev_step_vec is None):
                 p_target_init = None
                 if i >= 2:
                     p_target_init, _ = predict_eigenvalue_linear(s, results[i - 1], results[i - 2])
@@ -464,7 +771,7 @@ def pk_solve_at_velocity(
                     vecs,
                     omegas,
                     s,
-                    omega_n,
+                    omega_n_for_s,
                     converged_omegas_at_V,
                     converged_p_at_V,
                     freq_margin=mode_freq_margin,
@@ -474,13 +781,13 @@ def pk_solve_at_velocity(
                 )
                 wet_mode_identified = p_sel is not None
 
-            elif j == 0:
+            elif j == 0 and tracking_policy != "frequency" and prev_step_vec is None:
                 p_sel, u_sel, j_sel = mode_matching.select_pk_mode_initial_lock(
                     vals,
                     vecs,
                     omegas,
                     s,
-                    omega_n,
+                    omega_n_for_s,
                     converged_omegas_at_V,
                     converged_p_at_V,
                     freq_margin=mode_freq_margin,
@@ -489,6 +796,56 @@ def pk_solve_at_velocity(
                     min_omega_sep_rad=min_root_sep_rad,
                 )
                 wet_mode_identified = p_sel is not None
+
+            elif j == 0 and tracking_policy != "frequency" and prev_step_vec is not None and mac_matching:
+                p_target = mode_matching.predict_p_target_from_history(results, s, i)
+                if p_target is not None:
+                    print(f"      [P_TARGET] Predicted from history: p={p_target:.6f}, ω={np.abs(np.imag(p_target)):.3f} rad/s")
+                _msw = [0]
+                if diagnostics is not None:
+                    _msw[0] = diagnostics.mode_switch_warnings
+                p_sel, u_sel, j_sel = mode_matching.mode_matching_paper_compliant(
+                    vals,
+                    vecs,
+                    s,
+                    j,
+                    last_converged_omegas,
+                    converged_omegas_at_V,
+                    converged_vecs_at_V,
+                    mode_freq_margin,
+                    w_freq,
+                    w_mac,
+                    omega_n,
+                    _msw,
+                    prev_step_vec=prev_step_vec,
+                    prev_iter_vec=None,
+                    p_target=p_target,
+                    skip_inter_mode_on_perfect_mac=skip_inter_mode_on_perfect_mac,
+                    claimed_indices=converged_wet_indices_at_V,
+                    min_omega_sep_rad=min_root_sep_rad,
+                    omega_phys_min=omega_phys_min,
+                    mac_reference=mac_reference,
+                )
+                wet_mode_identified = p_sel is not None
+
+            elif j == 0 and tracking_policy != "frequency":
+                p_sel, u_sel, j_sel = mode_matching.select_pk_mode_initial_lock(
+                    vals,
+                    vecs,
+                    omegas,
+                    s,
+                    omega_n_for_s,
+                    converged_omegas_at_V,
+                    converged_p_at_V,
+                    freq_margin=mode_freq_margin,
+                    p_target=mode_matching.predict_p_target_from_history(results, s, i),
+                    claimed_indices=converged_wet_indices_at_V,
+                    min_omega_sep_rad=min_root_sep_rad,
+                )
+                wet_mode_identified = p_sel is not None
+
+            elif tracking_policy == "frequency":
+                pass  # already selected above
 
             else:
                 if mac_matching:
@@ -525,6 +882,8 @@ def pk_solve_at_velocity(
                         skip_inter_mode_on_perfect_mac=skip_inter_mode_on_perfect_mac,
                         claimed_indices=converged_wet_indices_at_V,
                         min_omega_sep_rad=min_root_sep_rad,
+                        omega_phys_min=omega_phys_min,
+                        mac_reference=mac_reference,
                     )
                     if diagnostics is not None:
                         diagnostics.mode_switch_warnings = _msw[0]
@@ -562,6 +921,9 @@ def pk_solve_at_velocity(
                         u_sel = vecs[:, j_sel]
                         print(f"      ⚠ No mode in bounds, selected closest: ω={np.abs(np.imag(p_sel)):.3f} rad/s")
 
+            if p_sel is not None and u_first_iter is None:
+                u_first_iter = np.array(u_sel, dtype=complex, copy=True)
+
             if p_sel is None:
                 print(f"    ✗ MODE {s} NOT FOUND (no eigenvalues in frequency bounds)")
                 print("       → Mode has disappeared, inserting NaN")
@@ -597,7 +959,25 @@ def pk_solve_at_velocity(
 
             k_change = abs(k_new - k)
 
-            if k_change < tol:
+            # ── Minimum-iteration guard ───────────────────────────────────────
+            # Iteration j=0 evaluates the aero downwash on the DRY structural
+            # frequency (mode-isolated Yuan & Zhang bootstrap, aero_system.py
+            # j==0,s>0 branch), which is internally inconsistent with the wet
+            # reduced frequency used for the Qjj table lookup. Iterations j>=1
+            # re-evaluate on the converging *wet* frequency (p_conv). Accepting
+            # the j=0 bootstrap whenever the k-guess happens to be within tol
+            # returns a systematically under-damped root and injects a step
+            # discontinuity (Model2t torsion branch ~13.7 kn: γ jumps -0.22→-0.11
+            # the moment j=0 acceptance turns on and stays on for all higher V).
+            # Requiring at least ``min_pk_iter`` refinement iterations forces every
+            # velocity to settle on the fully-coupled wet aero.
+            if k_change < tol and j < min_pk_iter:
+                print(
+                    f"      [min_pk_iter] converged at j={j} (Δk={k_change:.2e}<tol) "
+                    f"but forcing refinement to j>={min_pk_iter} (j=0 uses dry-freq bootstrap aero)"
+                )
+
+            if k_change < tol and j >= min_pk_iter:
                 extra = None
                 if on_converge_fn is not None:
                     if matrix_iter_state is not None:
@@ -612,9 +992,25 @@ def pk_solve_at_velocity(
                     contributions = extra.get("contributions")
                     w_modal_data = extra.get("w_modal_data")
 
+                mac_prev_velocity = float("nan")
+                mac_first_iter = float("nan")
+                if u_sel is not None:
+                    if prev_step_vec is not None:
+                        mac_prev_velocity = float(
+                            mode_matching.compute_mac(u_sel, prev_step_vec)
+                        )
+                    if u_first_iter is not None:
+                        mac_first_iter = float(
+                            mode_matching.compute_mac(u_sel, u_first_iter)
+                        )
+
                 print(f"    ✓ CONVERGED at iteration {j}")
                 print(f"      wet_eigenvalues: {vals[:5]}... (first 5)")
                 print(f"      k = {k_new:.6g}, ω = {omega_sel:.4f} rad/s, γ = {gamma_sel:.6f}, p = {p_sel:.6f}")
+                if np.isfinite(mac_prev_velocity):
+                    print(f"      MAC vs previous V: {mac_prev_velocity:.4f}")
+                if np.isfinite(mac_first_iter):
+                    print(f"      MAC vs first iter: {mac_first_iter:.4f}")
 
                 n_wet_save = min(3, vecs.shape[1])
                 wet_evecs_first3 = vecs[:, :n_wet_save].copy()
@@ -638,6 +1034,8 @@ def pk_solve_at_velocity(
                         "iterations": j + 1,
                         "contributions": contributions,
                         "w_modal_data": w_modal_data,
+                        "mac_prev_velocity": mac_prev_velocity,
+                        "mac_first_iter": mac_first_iter,
                     }
                 )
 
@@ -650,6 +1048,15 @@ def pk_solve_at_velocity(
                             "k": float(k_new),
                             "wet_evecs_first3": wet_evecs_first3,
                             "wet_evals_first3": wet_evals_first3,
+                        }
+                    )
+                    diagnostics.mac_convergence_history.append(
+                        {
+                            "V": float(V),
+                            "mode": int(s),
+                            "iteration": int(j),
+                            "mac_prev_velocity": mac_prev_velocity,
+                            "mac_first_iter": mac_first_iter,
                         }
                     )
 
@@ -677,6 +1084,62 @@ def pk_solve_at_velocity(
             print(f"    ✗ NO CONVERGENCE after {max_iter} iterations")
             print(f"      Final: k={k:.6g}, ω={omega_sel:.4f} rad/s, γ={gamma_sel:.6f}")
 
+            # ── Non-convergence death guard (frequency policy) ────────────────
+            # A frequency-tracked branch that never settles is almost always a
+            # branch whose oscillatory root has vanished (the mode goes
+            # overdamped/aperiodic, e.g. the 1st bending mode near ~11 kn as in
+            # Besch & Liu). Once the root disappears the k-iteration flip-flops
+            # between the dying root and a distant unrelated root and can never
+            # reach a fixed point. Recording the last (arbitrary) iterate injects
+            # a spurious spike and, because the slot survives, lets the branch
+            # re-attach onto a neighbouring mode at the next velocity (Branch 1
+            # then becomes a noisy duplicate of the torsion branch).
+            #
+            # The MAC-gated guard in the iteration loop only fires on *converged*
+            # picks, so it misses this failure mode. Here we terminate the branch
+            # when the final non-converged frequency is a large jump from the
+            # tracked frequency — a slow-but-continuous mode (final ω near
+            # ω_track) is left untouched and simply recorded as non-converged.
+            terminate_noconv = False
+            if (
+                tracking_policy == "frequency"
+                and freq_jump_terminate_frac is not None
+                and omega_track_v is not None
+                and np.isfinite(omega_track_v)
+                and float(omega_track_v) > 1e-6
+                and np.isfinite(omega_sel)
+            ):
+                jump_frac = abs(omega_sel - omega_track_v) / omega_track_v
+                if jump_frac > float(freq_jump_terminate_frac):
+                    terminate_noconv = True
+                    print(
+                        f"      ⊗ MODE {s} branch terminated (no convergence): "
+                        f"final ω={omega_sel:.3f} rad/s is {jump_frac * 100:.0f}% "
+                        f"from ω_track={omega_track_v:.3f} rad/s — the oscillatory "
+                        f"root vanished (mode overdamped/aperiodic)."
+                    )
+
+            if terminate_noconv:
+                results_for_V.append(
+                    {
+                        "mode": int(s),
+                        "p": np.nan,
+                        "omega": np.nan,
+                        "sigma": np.nan,
+                        "gamma": np.nan,
+                        "u": None,
+                        "k": np.nan,
+                        "vecs": None,
+                        "converged": False,
+                        "iterations": max_iter,
+                        "mode_lost": True,
+                        "warn": "no_convergence_terminated",
+                    }
+                )
+                if diagnostics is not None:
+                    diagnostics.convergence_issues += 1
+                continue
+
             results_for_V.append(
                 {
                     "mode": int(s),
@@ -700,12 +1163,15 @@ def pk_solve_at_velocity(
                 diagnostics.convergence_issues += 1
 
     M_struct = []
+    M_hydro = []
     M_effective = []
     K_struct = []
     K_aero = []
     K_effective = []
     C_struct = []
     C_aero = []
+    C_hydro = []
+    C_empirical = []
     C_effective = []
     w_velocity = []
     w_slope = []
@@ -721,7 +1187,17 @@ def pk_solve_at_velocity(
                 K_effective.append(contrib["K_effective"])
                 C_struct.append(contrib["C_struct"])
                 C_aero.append(contrib["C_aero"])
+                C_empirical.append(
+                    contrib.get(
+                        "C_empirical",
+                        np.zeros_like(contrib["C_struct"], dtype=float),
+                    )
+                )
                 C_effective.append(contrib["C_effective"])
+                if "M_hydro" in contrib:
+                    M_hydro.append(contrib["M_hydro"])
+                if "C_hydro" in contrib:
+                    C_hydro.append(contrib["C_hydro"])
 
             w_data = mode_data.get("w_modal_data")
             if w_data is not None:
@@ -729,19 +1205,23 @@ def pk_solve_at_velocity(
                 w_slope.append(w_data["w_slope_norm"])
 
     if diagnostics is not None and len(K_struct) > 0:
-        diagnostics.contributions_history.append(
-            {
-                "V": float(V),
-                "M_struct": M_struct,
-                "M_effective": M_effective,
-                "K_struct": K_struct,
-                "K_aero": K_aero,
-                "K_effective": K_effective,
-                "C_struct": C_struct,
-                "C_aero": C_aero,
-                "C_effective": C_effective,
-            }
-        )
+        entry = {
+            "V": float(V),
+            "M_struct": M_struct,
+            "M_effective": M_effective,
+            "K_struct": K_struct,
+            "K_aero": K_aero,
+            "K_effective": K_effective,
+            "C_struct": C_struct,
+            "C_aero": C_aero,
+            "C_empirical": C_empirical,
+            "C_effective": C_effective,
+        }
+        if M_hydro:
+            entry["M_hydro"] = M_hydro
+        if C_hydro:
+            entry["C_hydro"] = C_hydro
+        diagnostics.contributions_history.append(entry)
 
     if diagnostics is not None and len(w_velocity) > 0:
         diagnostics.w_modal_history.append(
@@ -787,6 +1267,15 @@ def pk_sweep(
     use_k_guess_each_iter=False,
     pk_predict_and_select=True,
     min_root_sep_rad=1.0,
+    on_velocity_step_fn=None,
+    omega_phys_min_frac=0.45,
+    tracking_policy="paper",
+    mac_reference="previous_velocity",
+    freq_jump_terminate_frac=None,
+    mac_terminate_floor=0.5,
+    track_seed_omegas=None,
+    min_pk_iter=1,
+    pk_discrete_dt=None,
     **kwargs,
 ):
     """
@@ -805,7 +1294,12 @@ def pk_sweep(
     print(f"Parameters: fXK0={fXK0}, fRLX={fRLX}, rho={rho}")
     if use_k_guess_each_iter:
         print(f"pk_use_k_guess_each_iter=True → k reset to k_guess={k_guess:.6g} after each non-converged iteration")
+    if pk_discrete_dt is not None:
+        print(f"pk_discrete_newmark=True → discrete Ass eigenvalues mapped via s=log(μ)/dt, dt={pk_discrete_dt:g} s")
     print("=" * 70)
+
+    from . import mode_matching
+    _omega_phys_min = mode_matching.physical_omega_min(omega_n, frac=omega_phys_min_frac)
 
     for i, V in enumerate(V_list):
         i_global = len(results)
@@ -845,24 +1339,19 @@ def pk_sweep(
             skip_inter_mode_on_perfect_mac=skip_inter_mode_on_perfect_mac,
             use_k_guess_each_iter=use_k_guess_each_iter,
             min_root_sep_rad=min_root_sep_rad,
+            omega_phys_min_frac=omega_phys_min_frac,
+            tracking_policy=tracking_policy,
+            mac_reference=mac_reference,
+            freq_jump_terminate_frac=freq_jump_terminate_frac,
+            mac_terminate_floor=mac_terminate_floor,
+            track_seed_omegas=track_seed_omegas,
+            min_pk_iter=min_pk_iter,
+            pk_discrete_dt=pk_discrete_dt,
         )
 
-        wet_spectrum = None
-        primary_mode = modes[0] if modes else 0
-        for md in res_V:
-            if md.get("mode") != primary_mode:
-                continue
-            if not md.get("converged", False):
-                continue
-            wet_vals_all = md.get("wet_vals_all")
-            if wet_vals_all is None:
-                wet_vals_all = md.get("wet_evals_first3")
-            if wet_vals_all is None:
-                continue
-            wet_spectrum = build_wet_spectrum_summary(
-                wet_vals_all, omega_n, res_V, freq_margin
-            )
-            break
+        wet_spectrum = pk_wet_spectrum_for_velocity(
+            res_V, omega_n, freq_margin, omega_phys_min=_omega_phys_min,
+        )
 
         if pk_predict_and_select and i_global >= 2:
             res_V = mode_matching.predict_and_select_reorder_modes(
@@ -872,8 +1361,17 @@ def pk_sweep(
                 delta=max(0.025, float(freq_margin)),
                 min_omega_sep_rad=min_root_sep_rad,
             )
+            wet_spectrum = pk_wet_spectrum_for_velocity(
+                res_V, omega_n, freq_margin, omega_phys_min=_omega_phys_min,
+            )
 
         results.append({"V": float(V), "modes": res_V, "wet_spectrum": wet_spectrum})
+
+        if on_velocity_step_fn is not None:
+            try:
+                on_velocity_step_fn(float(V), i_global, modes=res_V)
+            except TypeError:
+                on_velocity_step_fn(float(V), i_global)
 
         if len(res_V) > 0 and res_V[0].get("converged", False) and not np.isnan(res_V[0].get("k", np.nan)):
             k0_guess = res_V[0]["k"]

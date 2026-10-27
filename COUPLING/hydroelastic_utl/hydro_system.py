@@ -22,6 +22,59 @@ def _interp_modal_matrix(omega_grid, matrix_grid, omega_query):
     return (1.0 - alpha) * matrix_grid[i_lo] + alpha * matrix_grid[i_hi]
 
 
+def embed_capytaine_on_modal_dofs(A_capy, B_capy, n_modal, apply_indices, source_indices):
+    """Embed Capytaine square blocks into the full Roger / PK modal basis."""
+    A_capy = np.asarray(A_capy, dtype=float)
+    B_capy = np.asarray(B_capy, dtype=float)
+    n_modal = int(n_modal)
+    A_emb = np.zeros((n_modal, n_modal), dtype=float)
+    B_emb = np.zeros((n_modal, n_modal), dtype=float)
+
+    for ii, mi in enumerate(apply_indices):
+        si = source_indices[ii]
+        for jj, mj in enumerate(apply_indices):
+            sj = source_indices[jj]
+            A_emb[mi, mj] = A_capy[si, sj]
+            B_emb[mi, mj] = B_capy[si, sj]
+
+    return A_emb, B_emb
+
+
+def capytaine_matrices_at_omega(
+    omega_h,
+    added_mass_h,
+    added_damping_h,
+    omega_query,
+    n_modal,
+    apply_indices,
+    source_indices,
+):
+    """
+    Interpolate Capytaine modal added mass / radiation damping at ``omega_query``
+    and embed into the full modal DOF space.
+    """
+    # Capytaine BEM can return NaN at ω→0 (the first table sample, e.g. ω=0.1).
+    # A(ω), B(ω) are smooth, so drop any non-finite frequency rows and interpolate
+    # / clamp within the finite band. Without this, a low-ω query (which the MAC /
+    # predict-and-select PK tracking can request) interpolates the NaN row and
+    # poisons the eigensolver (scipy.eig: "array must not contain infs or NaNs").
+    omega_h = np.asarray(omega_h, dtype=float)
+    A_h = np.asarray(added_mass_h, dtype=float)
+    B_h = np.asarray(added_damping_h, dtype=float)
+    finite = (
+        np.isfinite(omega_h)
+        & np.isfinite(A_h.reshape(A_h.shape[0], -1)).all(axis=1)
+        & np.isfinite(B_h.reshape(B_h.shape[0], -1)).all(axis=1)
+    )
+    if finite.any() and not finite.all():
+        omega_h, A_h, B_h = omega_h[finite], A_h[finite], B_h[finite]
+    A_w = _interp_modal_matrix(omega_h, A_h, omega_query)
+    B_w = _interp_modal_matrix(omega_h, B_h, omega_query)
+    return embed_capytaine_on_modal_dofs(
+        A_w, B_w, n_modal, apply_indices, source_indices
+    )
+
+
 def _build_augmented_matrix_with_hydro(M_eff, C_eff, K_eff, q_dyn, Blag, blag, V, Nm, N):
     """Build A_aug including frequency-dependent hydro added mass/damping."""
     n = Nm

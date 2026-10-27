@@ -1,0 +1,17 @@
+{
+  "plot": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/output_data/GOLAND/framework_comparison/uvlm_basis_diag/goland_aero_mapping_vgvf.png",
+  "summary": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/output_data/GOLAND/framework_comparison/uvlm_basis_diag/goland_aero_mapping_vgvf.csv",
+  "bend_g": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/output_data/GOLAND/framework_comparison/uvlm_basis_diag/goland_aero_mapping_bend_g_delta.csv",
+  "V_f": {
+    "sharpy": 163.76736555165633,
+    "gino_wlsq": 162.28312757201647,
+    "gino_full_lsq": 150.57024423033835,
+    "gino_sharpy_basis": 163.8126776577601
+  },
+  "f_f": {
+    "sharpy": 11.249662830264352,
+    "gino_wlsq": 11.212703943770121,
+    "gino_full_lsq": 10.760065978580627,
+    "gino_sharpy_basis": 11.26005091483319
+  }
+}
