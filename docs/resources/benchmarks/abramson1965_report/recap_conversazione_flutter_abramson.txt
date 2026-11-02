@@ -1,0 +1,155 @@
+RECAP CONVERSAZIONE — Flutter anticipato vs teoria inviscida (ABRAMSON1965)
+================================================================================
+Data: 4 giugno 2026
+Contesto: benchmark Abramson1965, solver RFA + DLM + strip theory, report
+  docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf
+
+
+1. PROBLEMA INIZIALE
+--------------------
+- Letteratura (μ_b basso, DLM inviscido in acqua): teoria lineare "non conservativa"
+  → tende a SOVRASTIMARE V_f (ala sembra sicura a velocità dove in realtà c'è flutter).
+- Nel codice FSI invece il flutter numerico è ANTICIPATO:
+  • aero_im_Q_scale = 1.0  → V_f ~ 8 kn (sperimentale 48.1 kn)
+  • scale 0.5            → V_f ~ 18.1 kn
+  • scale 0.4            → V_f ~ 31.2 kn (f_F ~ 17.5 Hz, vicino al test)
+- Domanda: perché le forze/idrodinamica sembrano sovrastimate invece che sottostimate?
+
+
+2. RISULTATI CHIAVE DAI GRAFICI (stiffness_damping_contributions)
+-----------------------------------------------------------------
+Convenzione solver:
+  M_eff = M_struct - M_aero + M_hydro   (in pratica M_aero da B2 non usato con strip)
+  K_eff = K_struct - K_aero
+  C_eff = C_struct - C_aero + C_hydro + C_emp
+
+Rigidezze (K):
+  - K_struct e K_aero (B0) comparabili; K_eff evolve con V (modo [0,0] crolla ad alte V).
+  - Non è divergenza statica pura: l'instabilità è guidata dallo smorzamento.
+
+Smorzamento (C):
+  - C_struct (Rayleigh ζ=0.03): trascurabile
+  - C_hydro (Capytaine): ~0 nella banda flutter (run RFA+strip non usa B_∞ in C_eff)
+  - C_emp (abramson_delta, δ_add=5 s⁻¹): ~15 kg/s modale
+  - C_aero (B1 DLM, SOTTRATTO): domina; [0,0] cresce ~10 → ~280 kg/s a V≈45 kn
+  - C_eff[0,0] passa sotto zero già ~10 kn → flutter anticipato
+
+Conclusione diagnostica: il bilancio è rotto da Im(Q)→B1→C_aero ∝ ρ·V·B1 in acqua,
+non da "damping idrodinamico enorme" di Capytaine (quello è B(ω) a bassa ω, diverso).
+
+
+3. PARADOSSO CON IL PAPER (non conservativo vs flutter anticipato)
+----------------------------------------------------------------
+Il paper critica la MANCANZA di smorzamento viscoso stabilizzante (sottostima δ).
+Quel effetto spingerebbe V_f verso l'ALTO.
+
+Nel modello numerico prevale un altro termine, più grande:
+  - Im(Q) DLM = parte circolatoria non stazionaria (NON smorzamento viscoso)
+  - In C_eff entra come -0.5·ρ·V·B1 (con segno di sottrazione)
+  - Con ρ acqua ~997, lo stesso Im(Q) diventa enorme vs struttura + empirico
+
+Quindi:
+  • Paper: manca viscosità → meno dissipazione → V_f troppo alta (non conservativo)
+  • Codice: Im(Q)_DLM troppo grande in ρ·V → C_eff negativo presto → V_f troppo bassa
+
+Non contraddizione: fisiche diverse sul bilancio di C.
+
+Altri fattori Abramson:
+  - Paper usa coefficienti 3D MISURATI (curva 3), non DLM puro
+  - Profondità finita / superficie libera assenti nel DLM
+  - Sensibilità aero_im_Q_scale conferma gap Im(Q)_DLM vs effettivo Abramson
+
+
+4. SETUP NUMERICO RILEVANTE (config + report)
+---------------------------------------------
+- RFA + strip: added_mass_strip_theory=True, rfa_apply_b2_mass=False
+- M_hat include strip AM modale (~0.26 / 0.45 kg) vs Capytaine (~1.31 / 0.28 kg) → strip
+  sottostima AM modo flessionale (~×5)
+- Run flutter di riferimento: NO Capytaine in M_eff/C_eff (solo strip in M_hat)
+- ζ_str = 0.03 da reverse engineering Fig. 5 a V→0
+- empirical_fluid_delta_add_s = 5.0 s⁻¹
+- dihedral_angle=-90°, dihedral_rotate_beam=True, dihedral_rotate_aerogrid=False
+
+
+5. CORREZIONE UTENTE — rfa_apply_b2_mass=False (VERIFICA CODICE)
+----------------------------------------------------------------
+Affermazione iniziale dell'assistente (ERRATA):
+  "Senza B2 il Roger fit può gonfiare B1 per compensare l'inerzia mancante."
+
+Correzione dopo lettura flutter_solver.py:
+
+Con rfa_apply_b2_mass=False (use_b2=False):
+
+  A) FIT (_fit_roger_to_Q_modal, include_b2=False):
+     - Basis Re: [1, 0, lag…]  — NO colonna -k² per B2
+     - Basis Im: [0, k, lag…]  — B2 assente anche qui
+     - B2 resta matrice zero; coeffs[2] per B2 non esiste
+     - B1 è coeffs[1] sulla stessa colonna Im indipendentemente da include_b2
+
+  B) ASSEMBLAGGIO (_build_A_aug):
+     - M_eff = copy(M_hat) + M_hydro_add (strip), NON -0.5·ρ·B2
+     - C_eff = C_hat - scale·0.5·ρ·V·B1 + C_hydro + C_emp
+     - K_eff = K_hat - 0.5·ρ·V²·B0
+
+  C) RICOSTRUZIONE Q (_reconstruct_Q_modal, include_b2=False):
+     - Q = B0 + j·k·B1 + lag (senza termine -k²·B2)
+
+Conclusione: NON si fa fit di A2/B2 per poi ignorarlo; B2 non è grado di libertà del LSQ.
+La parte Re(Q) ~ -k² (inerzia nel GAF) va sui lag o errore residuo su Re(Q), non su B1.
+
+Nota minore codice: _build_A_aug accetta apply_b2_mass=… ma legge sempre
+config.rfa_apply_b2_mass (parametro passato ignorato; oggi coerente con use_b2).
+
+
+6. NOMENCLATURA
+---------------
+- roger_fit.py / PanelAero: A0, A1, A2 (formulazione s_bar = s/V)
+- flutter_solver.py: B0, B1, B2 (stesso ruolo fisico in M_eff, C_eff, K_eff)
+- Con hydroelastic correction: AM in M_hat (strip/Capytaine), Roger senza B2
+
+
+7. CONFRONTO Im(Q) IMPLEMENTATO (giugno 2026)
+--------------------------------------------
+Moduli:
+  - COUPLING/hydroelastic_utl/abramson_measured_coefficients.py
+  - COUPLING/hydroelastic_utl/abramson_imq_comparison.py
+  - examples/ABRAMSON1965/run_imq_vs_measured_comparison.py
+  - examples/ABRAMSON1965/postprocess_imq_from_qmodal_csv.py
+
+Dati misurati: abramson_measured_coefficients_span50.csv (DTIC TR-4, 50 % span)
+
+Convenzione: U = V/(bω) paper, k_codice = ω/V = 1/(U·b)
+
+Risultato (postprocess da qmodal CSV, V < 6 m/s):
+  |Im(Q_bb)_DLM| / |Im(Q_bb)_meas,cal|  ≈ 7–12 (media ≈ 10)
+  → DLM SOVRASTIMA Im(Q) ~10× vs curva 3 alla stessa k nel regime flutter numerico
+  → coerente con aero_im_Q_scale ~ 0.1–0.15
+  Segno spesso opposto (fase ~180°)
+
+Output:
+  output_data/ABRAMSON1965/ABRAMSON1965_ImQ_from_qmodal_vs_measured.csv/.png
+  output_data/ABRAMSON1965/ABRAMSON1965_ImQ_DLM_vs_measured.csv/.png (run completo)
+
+8. RFA + CAPYTAINE
+------------------
+Run recente: RFA+strip, V_f ≈ 4.06 m/s (7.9 kn). RFA_PK_method non attivo in config
+(Capytaine B_∞ ≈ 0 in banda flutter). Sezione report § RFA + Capytaine.
+
+9. AZIONI RIMANENTI
+--------------------
+- RFA_PK_method=True per confronto massa Capytaine in M_eff
+- aero_im_Q_scale_lags=True se si scala Im(Q)
+- Input Q(k) da coefficienti misurati (sostituire DLM)
+
+
+8. FILE E RIFERIMENTI CODICE
+----------------------------
+- examples/ABRAMSON1965/config_ABRAMSON1965.py
+- examples/config.py (GLOBAL_FLAGS: rfa_apply_b2_mass, aero_im_Q_scale, …)
+- COUPLING/flutter_solver.py: _fit_roger_to_Q_modal, _build_A_aug, _run_roger_rfa_sweep
+- COUPLING/hydroelastic_utl/aero_q_scaling.py
+- COUPLING/hydroelastic_utl/empirical_fluid_damping.py
+- Report: abramson1965_current_report.tex / .pdf
+
+================================================================================
+Fine recap.

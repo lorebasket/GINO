@@ -1,0 +1,7 @@
+framework,label,V_f_m_s,f_f_Hz
+sharpy_official,SHARPy UVLM (official nm8),163.76736555165633,11.249662830264352
+sharpy_official,"SHARPy native (exact Quvlm-table case, no fit)",163.6917191100448,11.265696785111444
+gino_uvlm,GINO-UVLM (own structural basis),162.28312757201647,11.212703943770121
+gino_uvlm_sharpy_basis,GINO-UVLM + SHARPy structural basis (p-k),163.8126776577601,11.26005091483319
+gino_native_coupling_sharpybasis,"GINO native coupling + SHARPy structural basis (no p-k, no fit)",163.6743803259072,11.264927484059669
+gino_native_coupling_ownbasis,"GINO native coupling, own structural basis (no p-k, no fit)",162.15350756446037,11.217172571736151

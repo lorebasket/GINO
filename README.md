@@ -1,0 +1,465 @@
+# GINO - An Opensource Framework for the hydroelastic analysis of composite hydrofoils.
+
+[![License: Dual%20(GPLv3%20or%20Commercial)](https://img.shields.io/badge/License-Dual%20GPLv3%20or%20Commercial-blue.svg)](LICENSE)
+
+Developed as part of a Master's thesis at Politecnico di Torino, in collaboration with:
+Pietro Casalone (Politecnico di Torino), Davide Tagliapietra (Shickler Tagliapietra Yacht Enngineering), Luca Valsecchi (Toolspole) and Paolo Motta (Toolspole).
+
+The increasing integration of composite materials into marine lifting surfaces, such as hydrofoils
+and turbine blades, is unlocking new opportunities for weight reduction and structural efficiency.
+However, this trend amplifies the need for reliable prediction of unsteady hydrodynamic behaviour
+and coupled hydro-elastic instabilities, with flutter remaining one of the most critical challenges. Most
+available numerical tools are either accurate but computationally expensive or rely on oversimplified
+modelling that fails to capture the complex coupling between hydrodynamics, structural anisotropy,
+and dynamic stability. This work introduces a comprehensive framework that directly addresses these
+limitations.
+
+Copyright (C) 2025 Lorenzo Baraltech — Dual-licensed under [GPL-3.0-or-later](LICENSE) or a separate [commercial license](COMMERCIAL_LICENSE.md).
+
+The framework couples a **finite element beam model** (FEA), the **unsteady vortex lattice method** (UVLM, via SHARPy) for the circulatory loads, a **boundary element method** (BEM, via Capytaine) for added mass, radiation damping and free-surface effects, and a **flutter solver** (p-k method or self-consistent p-k scan) to predict the flutter onset speed and frequency of hydrofoils, wings, and multi-body structures.
+
+---
+
+## Architecture
+
+```
+            STRUCTURE                               FLUID
+  ┌───────────────────────────┐   ┌───────────────────────────────────────────┐
+  │ SONATA + ANBA4            │   │ SHARPy linear UVLM  (FLUID/sharpy)        │
+  │  6x6 section matrices     │   │  lifting surfaces at the beam nodes       │
+  │          ↓                │   │  → modal GAF table Q(k) on GINO's modes   │
+  │ FEA beam (STRUCTURE/FEA)  │──▶│    (FLUID/PanelAero/Qjj/Quvlm_*.npz)      │
+  │  dry modes Φ, M̂, K̂, Ĉ     │   │                                           │
+  │                           │──▶│ Capytaine BEM  (FLUID/capytaine)          │
+  └───────────────────────────┘   │  closed hull, free surface at depth h     │
+                                  │  → A(ω), B(ω) projected on the same modes │
+                                  └───────────────────────────────────────────┘
+                                                     ↓
+                      COUPLING (modal space, same basis for all operators)
+         [ -ω² (M̂ + ΔA(ω)) + iω (Ĉ + B(ω)) + K̂ − q∞ Q(k) ] q = 0 ,  k = ωb/V
+                                                     ↓
+                 p-k tracking (flutter_solver)  /  self-consistent scan (utl/scan.py)
+                                                     ↓
+                              V-g, V-f, flutter speed and frequency
+```
+
+**Structure.** The beam is built from analytical section properties or from the SONATA / ANBA4
+cross-section matrices; the dry modes (mass-normalised, `M̂`, `K̂`, `Ĉ`) are the common basis of
+every fluid operator.
+
+**UVLM (circulatory loads).** SHARPy's linearised UVLM is built on the same beam, the modal
+displacements are imposed on the lattice and the generalised aerodynamic forces are tabulated in
+reduced frequency, `Q(k)` (`FLUID/sharpy/gino_bem/precompute_quvlm*.py`). The table is projected on
+GINO's modes, so it must be regenerated whenever the dry frequencies change. `aero_method = "UVLM"`
+in the case config selects it; the DLM panel method (PanelAero) is kept for legacy comparisons only.
+
+**BEM (added mass, radiation, free surface).** Capytaine solves the radiation problem of the
+submerged hull (strut, pod, foils) with the free surface at the actual depth, and returns the modal
+added mass `A(ω)` and radiation damping `B(ω)`. The UVLM, which has no free surface, already contains
+its own apparent (non-circulatory) mass `A_UVLM,nc`; to avoid counting it twice the two are combined
+with the **delta method**:
+
+```
+Q(k) from the UVLM table, unchanged        +        ΔA(ω) = A_BEM(ω) − A_UVLM,nc ,  B_BEM(ω)
+```
+
+`A_UVLM,nc` is fitted from the same GAF table (`utl/uvlm_nc_mass.py`). An identity test (putting
+`A_UVLM,nc` back in place of `A_BEM`) must reproduce the UVLM-only result
+(`utl/scan.py <case> delta --a-source uvlm`, `COUPLING/debug/check_hydro_mass_in_pk.py`).
+
+**Flutter solution.** The tracked p-k method (`COUPLING/flutter_solver.py`) follows each branch with
+wet-frequency seeding; the self-consistent scan (`utl/scan.py`) finds every root at every speed
+without a tracker and is the reference when branches cross or merge.
+
+---
+
+## Repository Structure
+
+```
+FSI/
+├── main.py                          ← Entry point: run a flutter analysis
+├── examples/                        ← Published cases: config + README each
+│   ├── config.py                    ← Global defaults and config loader
+│   ├── GOLAND/                      ← Goland wing in air (literature, validation)
+│   ├── GOLAND_water/                ← Goland-type wing in water (numerical case)
+│   ├── Model2t/                     ← Besch & Liu Model 2T strut + pod (experiment, validation)
+│   └── TFOIL_SIMPLE/                ← Simplified T-foil (computational case)
+│
+├── utl/                             ← Case-agnostic tools: runs, sweeps, scans, plots, checks
+│   └── README.md
+│
+├── STRUCTURE/
+│   ├── FEA/                         ← Structural model + FE utilities
+│   ├── SONATA/                      ← Beam cross-section analysis (SONATA + ANBA4)
+│   │   └── README.md                ← ← See this for SONATA workflow
+│   └── anba4/                       ← ANBA4 (git submodule)
+│
+├── FLUID/
+│   ├── aerodynamic_model.py         ← Aerodynamic model assembly
+│   ├── PanelAero/                   ← Qjj precomputation utilities
+│   │   └── README.md                ← ← See this for Qjj precomputation workflow
+│   ├── capytaine/                   ← BEM mesh and modal radiation precomputation
+│   │   └── README.md                ← ← See this for Capytaine BEM workflow
+│   ├── hydro/                       ← Analytical hydrodynamic models (pod)
+│   └── sharpy/                      ← SHARPy (patched) + gino_bem: UVLM GAF tables
+│
+├── COUPLING/                        ← Aero-structural coupling + flutter solvers
+│   ├── aero_structural_coupling.py
+│   ├── flutter_solver.py
+│   ├── hydroelastic_utl/
+│   └── debug/                       ← Coupling checks: beam/UVLM/BEM overlay, added mass
+│
+├── output_data/                     ← One reference result per published case
+└── docs/                            ← Thesis, technical overview, bibliography
+```
+
+---
+
+## Prerequisites
+
+A **conda environment** is strongly recommended (Python 3.9–3.11).
+
+Clone with the submodules (ANBA4, and the UVLM / xbeam libraries of SHARPy):
+
+```bash
+git clone --recurse-submodules https://github.com/lorebasket/GINO.git
+# or, in an existing clone
+git submodule update --init --recursive
+```
+
+---
+
+### 1. SONATA — cross-sectional beam analysis
+
+SONATA computes the 6×6 cross-sectional stiffness and mass matrices from blade geometry YAML files.  
+It is required only for cases listed under *"Cases that require SONATA outputs"* (e.g. `GOLAND_sonata`, `wing01`).
+
+Clone it into `STRUCTURE/SONATA/9_gitclone/`:
+
+```bash
+cd STRUCTURE/SONATA
+git clone https://github.com/WISDEM/SONATA 9_gitclone
+```
+
+> See [`STRUCTURE/SONATA/README.md`](STRUCTURE/SONATA/README.md) for the full workflow and per-script path configuration.
+
+---
+
+### 2. PanelAero — aerodynamic influence coefficients (DLM, legacy)
+
+PanelAero provides the Doublet Lattice Method and Vortex Lattice Method solvers used to precompute the Qjj matrices.  
+Install via pip:
+
+```bash
+pip install PanelAero
+```
+
+Repository: [github.com/DLR-AE/PanelAero](https://github.com/DLR-AE/PanelAero)
+
+> See [`FLUID/PanelAero/README.md`](FLUID/PanelAero/README.md) for the Qjj precomputation workflow.
+
+---
+
+### 3. Capytaine — BEM added mass and radiation damping
+
+Capytaine provides the Boundary Element Method (BEM) solver used to compute frequency-dependent modal added-mass and radiation-damping matrices for hydroelastic correction.
+
+Install the BEM-specific packages with:
+
+```bash
+pip install capytaine gmsh meshio
+```
+
+The Capytaine radiation workflow requires an exported hydrodynamic mesh and, for modal runs, previously computed dry structural modes of the beam.
+
+> See [`FLUID/capytaine/README.md`](FLUID/capytaine/README.md) for the mesh generation and modal radiation workflow.
+
+---
+
+### 4. ANBA4 — cross-sectional stiffness solver (FEniCS-based)
+
+ANBA4 is the finite-element solver called by SONATA. It requires **FEniCS** (`dolfin`).  
+Install FEniCS first via conda (Linux / WSL only):
+
+```bash
+conda create -n sonata-env -c conda-forge fenics python=3.10
+conda activate sonata-env
+```
+
+ANBA4 is a git submodule in `STRUCTURE/anba4/` (fetched with `--recurse-submodules`); install it in the environment:
+
+```bash
+pip install --no-deps -e STRUCTURE/anba4
+```
+
+> ANBA4 and FEniCS are only needed when running SONATA scripts. The main flutter analysis (`main.py`) does **not** require them.
+
+---
+
+### 5. SHARPy — UVLM generalised aerodynamic forces
+
+The UVLM GAF tables (`aero_method = "UVLM"`) are computed with SHARPy, shipped in `FLUID/sharpy/`
+with a few local patches to the linear UVLM; `FLUID/sharpy/gino_bem/` holds the GINO-specific case
+builders and precompute scripts. Build it in its own environment following `FLUID/sharpy/README.md`
+(the compiled UVLM and xbeam libraries are not versioned), then for example:
+
+```bash
+conda run -n sharpy python FLUID/sharpy/gino_bem/precompute_quvlm_goland.py --grid fine
+```
+
+---
+
+### 6. Python packages
+
+Install all remaining dependencies with:
+
+```bash
+pip install -r requirements.txt
+```
+
+This covers the core stack and PanelAero: `numpy`, `scipy`, `matplotlib`, `pandas`, `pyyaml`, and `PanelAero`.
+Install `capytaine`, `gmsh`, and `meshio` separately when using the BEM workflow.
+
+---
+
+## Running a Flutter Analysis
+
+### Quick start
+
+```bash
+python main.py <case_name>
+```
+
+For example:
+
+```bash
+python main.py GOLAND
+python main.py GOLAND_water
+python main.py Model2t
+python main.py TFOIL_SIMPLE
+```
+
+### Command-line options
+
+| Option | Description |
+|---|---|
+| `case_name` | Name of the analysis case (default: `GOLAND`) |
+
+Output (plots and logs) is saved to `output_data/<case_name>/`.
+
+Variants, parameter sweeps, self-consistent p-k scans and comparison plots are run with the
+case-agnostic tools in [`utl/`](utl/README.md), e.g.
+
+```bash
+python utl/run_case.py Model2t --out output_data/Model2t/uvlm_only --set aero_method='"UVLM"'
+python utl/plot_vgvf_compare.py runA runB -l A -l B --exp 18.1,6.4 -o compare.png
+```
+
+---
+
+## Analysis Pipeline
+
+`main.py` executes the following steps for each case:
+
+```
+1. Load configuration          examples/<case_name>/config_<case_name>.py
+        ↓
+2. Build structural model      FEA beam model from config or SONATA CSV outputs
+        ↓
+3. Structural analysis         Dry natural frequencies and mode shapes
+        ↓
+4. Fluid operators            UVLM GAF table Q(k) (SHARPy, precomputed on the dry modes)
+                               + Capytaine A(ω), B(ω) for water cases (delta method)
+        ↓
+5. Aero-structural coupling    modal projection on the common dry-mode basis
+        ↓
+6. Flutter solver              p-k tracking (or Roger RFA, legacy)
+        ↓
+7. Self-consistent scan        optional, utl/scan.py: all roots at every speed
+        ↓
+8. Post-processing             V-g / V-f plots, eigenvalue trajectories
+```
+
+---
+
+## Published Cases
+
+| Case | Type | Fluid | Aerodynamics / hydrodynamics |
+|---|---|---|---|
+| `GOLAND` | literature benchmark, validation | air | UVLM (DLM legacy) |
+| `GOLAND_water` | numerical case (submergence sensitivity) | water | UVLM + Capytaine BEM (delta) |
+| `Model2t` | Besch & Liu 1973 experiment, validation | water | UVLM + Capytaine BEM |
+| `TFOIL_SIMPLE` | simplified computational T-foil | water | UVLM + Capytaine BEM (delta) |
+
+Each case folder has a `README.md` describing the case and how to run it.
+Structural properties are defined in the case config; cases built from SONATA sections
+(see [`STRUCTURE/SONATA/README.md`](STRUCTURE/SONATA/README.md)) read the exported CSV files.
+
+---
+
+## Precomputing UVLM GAF Tables
+
+Run in the `sharpy` environment, after the dry modes of the case exist:
+
+```bash
+conda run -n sharpy python FLUID/sharpy/gino_bem/precompute_quvlm_goland.py --grid fine           # GOLAND / GOLAND_water
+conda run -n sharpy python FLUID/sharpy/gino_bem/precompute_quvlm.py --case <case> --grid <grid>   # generic cases
+```
+
+The table is written to `FLUID/PanelAero/Qjj/Quvlm_<case>_*.npz` and selected in the case config with
+`aero_method = "UVLM"` and `quvlm_npz_path`. For the whole chain (dry modes → GAF → BEM → A_UVLM,nc →
+scans) see `utl/run_chain.sh`.
+
+---
+
+## Precomputing Qjj Matrices (DLM, legacy)
+
+All cases require precomputed aerodynamic influence coefficient matrices (Qjj). These are **not included** in the repository due to their size and must be computed locally before running `main.py`.
+
+See [`FLUID/PanelAero/README.md`](FLUID/PanelAero/README.md) for the full workflow.
+
+In short:
+
+```bash
+cd FLUID/PanelAero/Qjj
+python executer.py          # single configuration
+```
+
+The case config file (`examples/<case_name>/config_<case_name>.py`) specifies which precomputed folder to load via the `qjj_dir` and `aerogrid_path` parameters.
+
+---
+
+## Precomputing Capytaine BEM Matrices
+
+Water cases use Capytaine BEM results for added mass, radiation damping and free-surface effects, combined with the UVLM table through the delta method (see [Architecture](#architecture)).
+
+In short:
+
+```bash
+python FLUID/capytaine/build_capytaine_mesh.py --case_name ABRAMSON1965
+python main.py ABRAMSON1965  # generate dry beam modal CSV files
+python FLUID/capytaine/run_modal_radiation.py --case-name ABRAMSON1965
+```
+
+The `run_modal_radiation.py` step needs the dry beam modal CSV files already produced in `output_data/<case_name>/`. If the case uses SONATA structural properties, run the SONATA preprocessing before the dry modal step. The case config then points the flutter solver to `capytaine_results_dir`, `mesh_path`, `depth`, and `depth_index`.
+
+The validation of the Capytaine BEM implementation is under development. Current Abramson benchmark notes are collected in [`docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf`](docs/resources/benchmarks/abramson1965_report/abramson1965_current_report.pdf).
+
+See [`FLUID/capytaine/README.md`](FLUID/capytaine/README.md) for the full workflow.
+
+---
+
+## Adding a New Case
+
+1. Create a folder `examples/<your_case>/`
+2. Add `config_<your_case>.py` — define geometry, stiffness, fluid, and Qjj path  
+   (copy an existing case as template, e.g. `examples/GOLAND/config_GOLAND.py`)
+3. Precompute the Qjj matrices for the new geometry using `FLUID/PanelAero/Qjj/executer.py`
+4. If structural properties come from SONATA, run the corresponding SONATA script first
+5. For Capytaine BEM correction, build the mesh and run `FLUID/capytaine/run_modal_radiation.py` after dry beam modes exist
+6. Run or rerun: `python main.py <your_case>`
+
+---
+
+## Output
+
+Results are saved in `output_data/<case_name>/`:
+
+- `flutter_analysis_<case>_<timestamp>.log` — full console log
+- V-g and V-f flutter diagrams (PNG)
+- Eigenvalue trajectory plots
+- Mode shape visualisations (if enabled in config)
+- Displacement/force CSVs (if enabled in config)
+
+---
+
+## Third-Party Software & Licenses
+
+This framework is built on top of external open-source libraries that are dynamically linked (called at runtime) but are **not** distributed as part of this repository. Their source code, copyright, and license terms remain entirely with their respective authors.
+
+---
+
+### PanelAero — BSD 3-Clause License
+
+**Repository:** [github.com/DLR-AE/PanelAero](https://github.com/DLR-AE/PanelAero)  
+**Author:** Arne Voß, Deutsches Zentrum für Luft- und Raumfahrt e.V. (DLR)  
+**License:** [BSD 3-Clause "New" or "Revised" License](https://github.com/DLR-AE/PanelAero/blob/master/LICENSE)
+
+PanelAero is used in this project to compute aerodynamic influence coefficient matrices (Qjj) via the Doublet Lattice Method (DLM) and Vortex Lattice Method (VLM). It is installed as a standard Python package (`pip install PanelAero`) and called through the scripts in `FLUID/PanelAero/Qjj/`.
+
+**Compliance statement:** The BSD 3-Clause License permits free use, modification, and integration into other projects, provided that the copyright notice and license text are retained. This framework does not redistribute PanelAero source code or binaries. The copyright notice is reproduced here in accordance with clause 1 of the license:
+
+> Copyright (c) 2020–2022, Deutsches Zentrum für Luft- und Raumfahrt e.V.  
+> All rights reserved.
+
+The name of DLR is not used to endorse or promote this project, in compliance with clause 3 of the license.
+
+---
+
+### SONATA — GNU Lesser General Public License v3 (LGPL-3.0)
+
+**Repository:** [github.com/WISDEM/SONATA](https://github.com/WISDEM/SONATA) / [github.com/NLRWindSystems/SONATA](https://github.com/NLRWindSystems/SONATA)  
+**License:** [GNU Lesser General Public License v3.0](https://github.com/NLRWindSystems/SONATA/blob/master/license.txt)
+
+SONATA is used in this project to compute the 6×6 cross-sectional stiffness and mass matrices of composite beam sections from YAML geometry files. It is cloned separately by the user into `STRUCTURE/SONATA/9_gitclone/` and is only required for specific analysis cases (e.g. `GOLAND_sonata`, `wing01`). The main flutter pipeline (`main.py`) does **not** depend on SONATA at runtime.
+
+**Compliance statement:** The GNU LGPLv3 permits use of the library in a larger application without imposing the LGPL on the application itself, provided that:
+1. The user can replace the LGPL-covered library with a modified version (satisfied: SONATA is cloned independently by the user, not bundled here).
+2. The use of SONATA is prominently disclosed and the license is referenced (satisfied: see above).
+
+This framework does **not** distribute a modified copy of SONATA. No SONATA source code is included in this repository. The LGPL license terms therefore do **not** extend to the original code of this framework.
+
+---
+
+### Capytaine — GNU General Public License v3 (GPL-3.0)
+
+**Repository:** [github.com/capytaine/capytaine](https://github.com/capytaine/capytaine)  
+**License:** [GNU General Public License v3.0](https://github.com/capytaine/capytaine/blob/master/LICENSE)
+
+Capytaine is used in this project as a Python BEM solver for linear potential-flow radiation problems. It is installed separately by the user and called through the scripts in `FLUID/capytaine/`.
+
+**Compliance statement:** This framework does **not** redistribute Capytaine source code or binaries. Capytaine remains an optional external dependency for BEM preprocessing, and its license terms remain with the upstream project.
+
+---
+
+### SHARPy, UVLM, xbeam — BSD 3-Clause License
+
+**Repository:** [github.com/ImperialCollegeLondon/sharpy](https://github.com/ImperialCollegeLondon/sharpy) (UVLM and xbeam libraries from the same organisation)  
+**License:** BSD 3-Clause, Copyright (c) 2018–2019 Imperial College London
+
+SHARPy is distributed in `FLUID/sharpy/` with local modifications to the linear UVLM; UVLM and xbeam are
+git submodules pointing to the unmodified upstream repositories. Their copyright notices and license files
+are kept unchanged (`FLUID/sharpy/LICENSE`, `lib/UVLM/LICENSE`, `lib/xbeam/LICENSE`), as required by clause 1.
+The name of Imperial College London is not used to endorse or promote this project (clause 3).
+
+---
+
+### ANBA4 — GNU General Public License v3 (GPL-3.0)
+
+**Repository:** [github.com/ANBA4/anba4](https://github.com/ANBA4/anba4)  
+**License:** GNU GPL v3
+
+ANBA4 is referenced as a git submodule in `STRUCTURE/anba4/` (unmodified upstream) and is used through SONATA
+to compute cross-sectional properties.
+
+---
+
+### Summary
+
+| Software | License | Usage mode | Code included in this repo |
+|---|---|---|---|
+| **This framework (GINO)** | **Dual: GPL-3.0-or-later OR Commercial** | — | Yes |
+| PanelAero | BSD 3-Clause | `pip install` + called at runtime | No |
+| SONATA | GNU LGPL v3 | Cloned separately + called at runtime | No |
+| Capytaine | GNU GPL v3 | `pip install` + called at runtime | No |
+| SHARPy | BSD 3-Clause | Distributed with local patches (`FLUID/sharpy/`) | Yes (modified) |
+| UVLM, xbeam | BSD 3-Clause | Git submodules of SHARPy | No (submodule link) |
+| ANBA4 | GNU GPL v3 | Git submodule (`STRUCTURE/anba4/`) | No (submodule link) |
+
+These libraries are used in compliance with their respective licenses. Licensing of this framework itself is defined by the project dual-license terms in [`LICENSE`](LICENSE) and [`COMMERCIAL_LICENSE.md`](COMMERCIAL_LICENSE.md).
+
+---
+
+## Reference
+
+For the theoretical background, see the thesis document in `docs/`.

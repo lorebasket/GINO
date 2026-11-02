@@ -1,0 +1,469 @@
+================================================================================
+TECHNICAL REPORT
+Panel-Space Qjj, Modal Coupling, and Geometry Assumptions
+in the FSI Flutter Codebase
+================================================================================
+
+Document scope: Current implementation as of repository state (June 2026).
+Primary modules: FLUID/PanelAero/Qjj/, COUPLING/aero_structural_coupling.py,
+                  COUPLING/hydroelastic_utl/aero_system.py,
+                  COUPLING/flutter_solver.py,
+                  STRUCTURE/FEA/structural_analysis.py, main.py
+
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+
+The FSI flutter pipeline implements linear modal aeroelasticity in the classical
+DLM tradition:
+
+  1. Qjj (panel-to-panel aerodynamic influence matrix) is precomputed once on a
+     fixed (undeformed) aerogrid and stored on disk for a grid of reduced
+     frequency k = omega/V and Mach number Ma.
+
+  2. At each airspeed V (and each PK iteration on k), the code does NOT rebuild
+     the aerogrid or re-run DLM. It interpolates Qjj(k, Ma) from disk.
+
+  3. Structural motion enters aerodynamics through fixed coupling matrices
+     Z, Z_qs, Z_force and fixed dry mode shapes Phi, producing the modal
+     aerodynamic matrix Q_modal via a double projection.
+
+  4. Mode shapes are a basis, not the instantaneous physical deformation during
+     flutter. Physical motion is q(t) = Phi * eta(t); in harmonic linear theory
+     the spatial pattern is frozen in Phi while amplitudes (and frequencies)
+     evolve with V.
+
+This is consistent with linear p-k / Roger flutter theory. It is NOT a
+large-deformation or geometry-updating FSI loop. The statement that "Qjj should
+be recomputed when the wing deforms" is physically correct in general, but
+outside the assumptions of the present code, which explicitly freeze panel
+geometry in Qjj and encode structural motion only through Z @ Phi.
+
+
+--------------------------------------------------------------------------------
+2. PROBLEM FRAMING: TWO DIFFERENT QUESTIONS
+--------------------------------------------------------------------------------
+
+  Question                          | Linear flutter (this code)     | Nonlinear FSI
+  ----------------------------------|--------------------------------|---------------------------
+  Does aerogrid geometry change?    | No — reference lattice         | Yes — follows structure
+  Is Qjj recomputed per V step?     | No — interp. in (k, Ma)        | Yes (or CFD update)
+  What carries deformation info?    | Phi via Z @ Phi (linear pattern)| Actual mesh coordinates
+  Valid when?                       | Small harmonic perturbations   | LCO, large static defl.
+
+The codebase deliberately occupies the left column.
+
+
+--------------------------------------------------------------------------------
+3. WORKFLOW OVERVIEW (main.py)
+--------------------------------------------------------------------------------
+
+Analysis sequence:
+
+  1. Structural model          — structural_model.build(config)
+  2. Dry modal analysis        — structural_analysis.run_dry_analysis
+                                 -> M_hat, C_hat, K_hat, dry_eigenvectors (Phi),
+                                    dry_eigenvalues
+  3. Aerogrid load             — from aerogrid.npz (saved with precomputed Qjj)
+  4. Optional dihedral         — post_dihedral_utils.apply_structural_dihedral_about_x
+  5. Coupling matrices         — aero_structural_coupling.calculate_spline_matrix
+                                 -> Z, Z_qs, Z_force, Apan
+  6. Flutter solve             — PK (pk_method) or Roger RFA (flutter_solver)
+                                 using make_Qg_func
+
+Qjj precomputation is a separate offline step via:
+  FLUID/PanelAero/Qjj/executer.py --case <NAME>
+It is not part of the per-velocity loop.
+
+
+--------------------------------------------------------------------------------
+4. WHAT IS Qjj, AND HOW IS IT CALCULATED?
+--------------------------------------------------------------------------------
+
+4.1 Definition
+--------------
+
+Qjj is the complex panel-space aerodynamic influence matrix from PanelAero's
+Doublet Lattice Method (DLM). For N_p panels, Qjj has shape (N_p, N_p). Entry
+(i, j) relates the aerodynamic response at panel i to a harmonic downwash
+excitation at panel j, on the reference lattice.
+
+Qjj is NOT the modal matrix Q_hh or Q_modal. The modal matrix is assembled
+later from Qjj, coupling matrices, and Phi.
+
+
+4.2 Precomputation (offline)
+----------------------------
+
+In precompute_qjj.py:
+
+  Qjj = DLM.calc_Qjj(aerogrid, Ma, k, method=dlm_method)
+
+For each pair (k, Ma) on a predefined grid (k_list, Ma_list from case config),
+DLM uses:
+
+  - Panel corners, areas A, normals N, chord lengths l
+  - Control points at 3/4 chord (offset_j)
+  - Vortex locations at 1/4 chord
+  - Reduced frequency k = omega/V (PanelAero convention)
+  - Mach number Ma = V / c_sound
+
+Results are stored as k_XXX__Ma_YYYY_real.npy / _imag.npy under e.g.:
+  FLUID/PanelAero/Qjj/qjj_precomputed/
+    <case>_<fluid>_alpha<alpha>_nspan<n>_nchord<m>_<method>/
+
+The aerogrid used for precomputation must match the one loaded at runtime
+(config.qjj_dir / aerogrid_path).
+
+
+4.3 Runtime use (online)
+------------------------
+
+At each PK iteration or Roger k-sweep point, the code calls:
+  interp_qjj_from_disk_old(qjj_dir, k_query, Ma_query)
+Bilinear (or auto/nearest) interpolation in (k, Ma) only.
+
+What changes with velocity:
+
+  Quantity              | Updates with V? | How
+  ----------------------|-----------------|----------------------------------
+  Qjj panel geometry    | No              | Fixed reference aerogrid
+  Qjj values            | Yes             | Via k = omega/V and Ma = V/c interp.
+  Z, Z_qs, Z_force      | No              | Built once after coupling
+  Phi                   | No              | Dry modes fixed for flutter sweep
+  Q_modal               | Yes             | Reassembled each (k, V) from above
+
+So: "recalculate Qjj at each velocity step" is implemented as re-interpolate
+the same panel-space operator at a new (k, Ma), NOT re-mesh and re-run DLM on
+a deformed wing.
+
+
+--------------------------------------------------------------------------------
+5. MODE SHAPES VS PHYSICAL DEFORMATION
+--------------------------------------------------------------------------------
+
+5.1 Structural modal basis
+--------------------------
+
+Dry analysis solves:
+
+  M_hat * eta_ddot + C_hat * eta_dot + K_hat * eta = 0
+
+with physical coordinates (free DOFs):
+
+  q_phys = Phi * eta
+
+Phi (structural_results.dry_eigenvectors) has columns phi_j — mode shapes: the
+spatial pattern of translations and rotations at each beam node when generalized
+coordinate eta_j = 1.
+
+  |                    | Mode shapes phi_j              | Physical deformation q(t)
+  |--------------------|--------------------------------|--------------------------------
+  | Origin             | Eigenvectors of (K, M)         | Response to loads / flutter
+  | Amplitude          | Normalized (mass-normalized)   | Set by eta_j(t) from dynamics
+  | Shape              | Single mode per column         | Superposition Sum phi_j * eta_j(t)
+  | When computed      | Once in structural analysis    | Evolves in time / harmonic amp.
+
+Mode shapes are NOT the deformed wing in operation. They are the coordinate
+basis. Flutter analysis assumes the wing moves in the subspace spanned by Phi
+with small amplitudes.
+
+
+5.2 What the flutter solver actually tracks
+-------------------------------------------
+
+In PK, at each airspeed the solver iterates reduced frequency k until the wet
+eigenvalue p = sigma + i*omega converges. The spatial pattern remains the
+tracked mode shape (MAC matching against dry_vecs). What changes is:
+
+  - frequency omega(k, V)
+  - damping sigma(k, V)
+  - modal participation amplitudes in the linear eigenvector of companion matrix Ac
+
+The aerogrid and Qjj geometry do NOT follow a growing physical deflection.
+
+
+--------------------------------------------------------------------------------
+6. COUPLING MATRICES: Z, Z_qs, Z_force
+--------------------------------------------------------------------------------
+
+Built once in aero_structural_coupling.calculate_spline_matrix from the
+undeformed aerogrid and beam.
+
+
+6.1 Z — downwash kinematics (3/4 chord)
+---------------------------------------
+
+For each panel, linear spanwise spline between two beam nodes; then
+small-displacement rigid kinematics projected on panel normal n:
+
+  w_j = n_j . (u + theta x r_j),   r_j = x_ctrl,j - x_EA,j
+
+x_EA from corner1 + xea_factor * l_m (PanelAero convention: LE at
+-xea_factor * c => EA at x = 0 for benchmark cases like Abramson, Goland).
+
+Z maps structural DOFs -> scalar downwash per panel. Valid for small rotations
+and fixed geometry (frozen n, r).
+
+
+6.2 Z_qs — quasi-steady slope (strip theory)
+--------------------------------------------
+
+Only spanwise rotation DOF contributes:
+
+  (Z_qs)_j,theta_span = n_j . (e_span x e_flow)
+
+with e_flow = [1, 0, 0]. No lever arm, no translations. This is the geometric
+incidence channel, used WITHOUT the i*omega/V factor.
+
+
+6.3 Z_force — load transfer (1/4 chord)
+---------------------------------------
+
+Same kinematics as Z but at force point offset_l. With diagonal panel areas A:
+
+  Apan = Z_force^T * A
+
+Theory-compliant force projection to structural DOFs.
+
+All three matrices have constrained root DOFs removed via cantilever_beam,
+matching structural BCs.
+
+
+--------------------------------------------------------------------------------
+7. MODAL ASSEMBLY: PRE- AND POST-MULTIPLICATION
+--------------------------------------------------------------------------------
+
+7.1 Full formula
+----------------
+
+Implementation in aero_system.make_Qg_func:
+
+  Q_modal(k) = Phi^T * Z_force^T * A * Qjj(k, Ma) * [i*k*Z + Z_qs] * Phi
+
+Harmonic PK path (frequency domain):
+
+  w_velocity_modal = (i*omega/V) * Z @ Phi     # unsteady velocity downwash per mode
+  w_slope_modal    = Z_qs @ Phi                # quasi-steady slope per mode
+  w_panel          = Qjj @ (w_velocity_modal + w_slope_modal)
+  Q_modal          = (Z_force @ Phi).T @ A @ w_panel
+
+Roger RFA path (flutter_solver.py) uses the same kernel at each k on a grid:
+
+  w_k    = (1j*k * Z + Z_qs) @ Phi
+  Qm_k   = (Z_force @ Phi).T @ A_diag @ (Qjj_k @ w_k)
+
+
+7.2 Physical meaning of each multiplication
+-------------------------------------------
+
+Coupling chain (mode j excites, mode i receives):
+
+  [Mode j]  --Phi-->  q_phys = phi_j
+            --Z,Z_qs-->  panel downwash w_j = ik*Z*phi_j + Z_qs*phi_j
+            --Qjj-->  panel aero response (fixed lattice)
+            --Z_force^T*A-->  generalized force on mode i
+            --Phi^T-->  Q_modal(i,j)
+
+  | Operation                    | Matrix form              | Physical meaning
+  |------------------------------|--------------------------|----------------------------------
+  | Right: (ik*Z + Z_qs) * Phi   | Mode -> panel downwash   | If mode j oscillates with unit
+  |                              |                          | amplitude, what downwash pattern
+  |                              |                          | acts on each panel?
+  | Middle: Qjj @ ...            | Panel -> panel           | Linear unsteady aero induction on
+  |                              |                          | reference lattice
+  | Left: Phi^T * Z_force^T * A  | Panel -> modal force     | Generalized aero force on mode i
+
+Element Q_modal(i,j) = aerodynamic force on mode i due to motion in mode j.
+
+
+7.3 Does Z @ Phi mean "we see the deformed beam"?
+-------------------------------------------------
+
+Partially, in the linear sense:
+
+  - Column j of Z @ Phi is the downwash field induced by mode shape phi_j.
+  - That encodes how bend/twist is distributed along the span.
+
+But:
+
+  - The aerogrid does NOT move; only the boundary condition (downwash input to
+    DLM) reflects the mode.
+  - Qjj is NOT recomputed on a bent mesh.
+  - Amplitudes are not "visible" in Z @ Phi alone — that uses unit modal
+    amplitude; actual motion scales with eta_j(t).
+
+Phi introduces the spatial pattern of motion into aerodynamics; it does NOT
+update aerodynamic geometry.
+
+
+--------------------------------------------------------------------------------
+8. PK AND ROGER: WHAT HAPPENS AT EACH VELOCITY STEP
+--------------------------------------------------------------------------------
+
+8.1 PK method
+-------------
+
+For each V in config.V_list and each tracked mode:
+
+  1. Iterate k until convergence (pk_method.pk_solve_at_velocity).
+  2. Each iteration: Qg_func(k, V, ...) -> Q_modal -> companion matrix Ac.
+  3. Eigenanalysis of Ac; update k from wet frequency omega = Im(p).
+
+Qjj is loaded/interpolated; Z, Phi are unchanged. Optional Capytaine/strip
+corrections modify M_hat, C_hat per V, not Qjj geometry.
+
+
+8.2 Roger RFA
+-------------
+
+Per velocity:
+
+  1. Build Q_modal(k) for all k on k_list_V using frozen Qjj, Z, Phi.
+  2. Fit Roger rational function approximation.
+  3. Eigenanalysis of augmented state matrix A_aug.
+
+Again: no DLM re-run on deformed geometry.
+
+
+--------------------------------------------------------------------------------
+9. RELATION TO "SHOULD WE RECALCULATE Qjj?"
+--------------------------------------------------------------------------------
+
+9.1 What the statement gets right
+---------------------------------
+
+If the wing physically deforms enough that panel positions, normals, or areas
+change meaningfully, the panel-space AIC Qjj itself changes. In a nonlinear FSI
+loop one would:
+
+  1. Compute q = Phi * eta (or full FE displacement),
+  2. Update aerodynamic surface mesh,
+  3. Recompute Qjj (or CFD Jacobian),
+  4. Solve coupled equilibrium.
+
+
+9.2 What this codebase does instead
+-----------------------------------
+
+It adopts the classical linear DLM flutter assumption:
+
+  Aerodynamic influence coefficients are evaluated on the reference
+  configuration; structural motion enters linearly through downwash coupling
+  Z @ Phi.
+
+This is the standard Goland / NASTRAN / ZAERO approach for small perturbation
+flutter. Deformation amplitudes are assumed O(epsilon) with epsilon << chord;
+errors are often negligible below 1-2% chord for attached flow.
+
+
+9.3 What DOES update with V (and why that is not geometry)
+----------------------------------------------------------
+
+  Mechanism              | Role
+  -----------------------|--------------------------------------------------
+  k = omega/V            | Unsteady aero phase/magnitude via Qjj(k,Ma) interp.
+  Wet omega, sigma       | PK iteration finds frequency/damping at each V
+  Ma = V/c               | Compressibility in Qjj interpolation
+  Strip / Capytaine        | Added mass/damping in M_hat, C_hat — not geom. Qjj
+
+The code has velocity-dependent aerodynamics through frequency and Mach indexing
+on a fixed lattice, not through mesh morphing.
+
+
+--------------------------------------------------------------------------------
+10. ASSUMPTIONS, LIMITATIONS, AND VALIDITY
+--------------------------------------------------------------------------------
+
+10.1 Explicit assumptions
+-------------------------
+
+  1. Small harmonic motion — linearized EOM, linear Z, fixed Qjj geometry.
+  2. Frozen aerogrid — panel lattice from undeformed CAERO1 / aerogrid.npz.
+  3. Fixed modal basis — Phi from dry (+/- strip added mass) structural solve.
+  4. Linear spline — two-node span interpolation between beam nodes.
+  5. Z_qs strip simplification — span rotation only, flow along +X.
+  6. PanelAero k convention — k_pa = omega/V for Qjj load/downwash; Roger
+     paper_zurich uses separate k* only in fit/EOM.
+
+
+10.2 When the framework breaks down
+-----------------------------------
+
+  - Large static twist/bend changing effective incidence and panel normals.
+  - Limit-cycle oscillations with finite amplitude.
+  - Strong geometric nonlinearities (stall, vortex shedding tied to shape).
+  - Cases where chordwise mesh coarseness makes per-panel ea_point deviate from
+    global x = 0 EA line.
+
+
+10.3 What would be required for geometry-updating FSI
+-----------------------------------------------------
+
+Not implemented today; would need:
+
+  - Deformed panel coordinates x_j(q) each step or Newton iteration,
+  - Qjj(x_j) or equivalent CFD sensitivity,
+  - Optionally updated Z(x_j) if coupling points move with structure,
+  - Possibly updated Phi if prestress/geometric stiffness matters.
+
+
+--------------------------------------------------------------------------------
+11. SUMMARY TABLE
+--------------------------------------------------------------------------------
+
+  Object        | Space           | Computed when              | Depends on deformation?
+  --------------|-----------------|----------------------------|-------------------------
+  Qjj           | N_p x N_p panel | Offline; runtime (k,Ma)    | No (reference geom only)
+  Z,Z_qs,Z_force| N_p x N_dof     | Once at coupling           | No (reference geom)
+  Phi           | N_dof x N_m     | Once in structural analysis| No during flutter sweep
+  Z @ Phi       | N_p x N_m       | Each Q_modal evaluation    | Pattern of mode j only
+  Q_modal       | N_m x N_m       | Each PK iter / k in RFA    | Via k,V; not mesh update
+
+
+--------------------------------------------------------------------------------
+12. CONCLUSIONS
+--------------------------------------------------------------------------------
+
+  1. Qjj in this code is panel-space DLM, precomputed on an undeformed aerogrid
+     and interpolated in (k, Ma) during flutter — not recomputed from deformed
+     geometry at each velocity step.
+
+  2. Pre-multiply (ik*Z + Z_qs) * Phi distributes each mode shape to panel
+     downwash (unsteady + quasi-steady channels).
+
+  3. Post-multiply Phi^T * Z_force^T * A projects panel aerodynamic effects to
+     generalized modal forces.
+
+  4. Phi provides the spatial coupling pattern; it does not move the aerodynamic
+     mesh. Physical deformation q(t) = Phi * eta(t) is represented linearly in
+     the downwash input to a fixed Qjj.
+
+  5. This is correct and standard for linear p-k / Roger flutter. It is not a
+     large-deformation FSI loop. Recomputing Qjj on deformed geometry applies
+     to nonlinear regimes, outside the current solver's design scope.
+
+
+--------------------------------------------------------------------------------
+13. CODE REFERENCES
+--------------------------------------------------------------------------------
+
+  Topic                  | Location
+  -----------------------|--------------------------------------------------
+  Qjj precompute         | FLUID/PanelAero/Qjj/precompute_qjj.py, executer.py
+  Qjj interpolation      | interp_qjj_from_disk_old in precompute_qjj.py
+  Coupling build         | COUPLING/aero_structural_coupling.py
+  Z / Z_qs / Z_force     | COUPLING/hydroelastic_utl/aerogrid_coupling_matrix.py
+  Modal Q assembly       | COUPLING/hydroelastic_utl/aero_system.py (make_Qg_func)
+  Roger Q_modal grid     | COUPLING/flutter_solver.py (~line 1405)
+  PK driver              | COUPLING/flutter_solver.py (_solve_pk_method)
+  Modal reduction        | STRUCTURE/FEA/fea_utl/modal_reduction.py
+  EA at x=0 convention   | STRUCTURE/FEA/fea_utl/beam_geometry.py, case configs
+  Roger / k conventions  | docs/resources/benchmarks/abramson1965_report/
+                           roger_convention_paper_zurich.md
+
+
+================================================================================
+End of report
+================================================================================

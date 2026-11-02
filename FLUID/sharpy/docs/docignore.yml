@@ -1,0 +1,24 @@
+# Docs to build list
+# once this is fully implemented this will become the file that specifies which packages are to be ignored for the
+# purposes of building documentation
+packages:
+  - folder: 'sharpy/controllers'
+    docs_folder: 'controllers'
+  - folder: 'sharpy/rom'
+    docs_folder: 'rom'
+
+modules:
+  - 'sharpy/postproc'
+  - 'sharpy/solvers'
+  - 'sharpy/linear/dev'
+  - 'sharpy/linear/src/uvlmutils.py'
+  - 'sharpy/aero/utils/uvlmlib.py'
+  - 'sharpy/aero/utils/utils.py'
+  - 'sharpy/utils/plot_utils.py'
+  - 'sharpy/utils/solver_interface.py'
+  - 'sharpy/linear/test'
+  - 'sharpy/linear/utils'
+#  - 'sharpy/generators'
+  - 'sharpy/presharpy'
+  - 'sharpy/lib'
+  - 'sharpy/__pycache__'

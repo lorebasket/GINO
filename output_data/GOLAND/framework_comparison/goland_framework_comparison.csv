@@ -1,0 +1,4 @@
+framework,label,V_f_m_s,f_f_Hz
+gino_dlm,"GINO-DLM (p-k, EA mass)",185.62080103359173,11.921836352894461
+gino_uvlm,GINO-UVLM (discrete p-k; SHARPy UVLM overlays),162.28312757201647,11.212703943770121
+gino_dlm_sharpy_basis,GINO-DLM + SHARPy basis,190.21238095238095,12.147119708068203

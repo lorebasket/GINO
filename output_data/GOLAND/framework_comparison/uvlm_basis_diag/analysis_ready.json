@@ -1,0 +1,130 @@
+{
+  "dry_mode_mac_parity": [
+    {
+      "mode": 1,
+      "f_gino_Hz": 7.721603302796447,
+      "f_sharpy_Hz": 7.650346484418893,
+      "df_pct": 0.9314194922109548,
+      "twist_sign": 1.0,
+      "MAC_full": 0.9326798664089277,
+      "MAC_w": 0.9999999997409246,
+      "MAC_th": 0.34118222633964385,
+      "c_w_lsq": 1.4116403559902237,
+      "tip_w_ratio": 1.4116283656829063,
+      "tip_th_ratio": -85.2188811430417,
+      "rms_w_rel": 2.272149982188282e-05
+    },
+    {
+      "mode": 2,
+      "f_gino_Hz": 15.239901920540815,
+      "f_sharpy_Hz": 15.226205056713319,
+      "df_pct": 0.089955860810221,
+      "twist_sign": -1.0,
+      "MAC_full": 0.998317966515784,
+      "MAC_w": 0.9999998315858888,
+      "MAC_th": 0.9999866980286767,
+      "c_w_lsq": -1.4233142272082733,
+      "tip_w_ratio": -1.422824612467274,
+      "tip_th_ratio": -1.663486474406319,
+      "rms_w_rel": 0.0005841038462311137
+    },
+    {
+      "mode": 3,
+      "f_gino_Hz": 38.798897395472316,
+      "f_sharpy_Hz": 38.6147020325094,
+      "df_pct": 0.47700837574208554,
+      "twist_sign": -1.0,
+      "MAC_full": 0.9623951556390047,
+      "MAC_w": 0.9999795620109143,
+      "MAC_th": 0.9807739678683416,
+      "c_w_lsq": -1.3890378409129898,
+      "tip_w_ratio": -1.3776312948685883,
+      "tip_th_ratio": -2.310634620408232,
+      "rms_w_rel": 0.0062796812031216875
+    },
+    {
+      "mode": 4,
+      "f_gino_Hz": 55.05900617871307,
+      "f_sharpy_Hz": 54.61249658703786,
+      "df_pct": 0.8175960074698082,
+      "twist_sign": -1.0,
+      "MAC_full": 0.9219860476657303,
+      "MAC_w": 0.9999954846816053,
+      "MAC_th": 0.8939548686426978,
+      "c_w_lsq": -1.4185751549841856,
+      "tip_w_ratio": -1.4160193966958907,
+      "tip_th_ratio": -0.6690802617113797,
+      "rms_w_rel": 0.0030143766686082864
+    }
+  ],
+  "dry_mode_mac_quvlm_source": [
+    {
+      "mode": 1,
+      "f_gino_Hz": 7.846447841298864,
+      "f_sharpy_Hz": 7.650346484418893,
+      "df_pct": 2.5633003325974957,
+      "twist_sign": 1.0,
+      "MAC_full": 0.9261898960192108,
+      "MAC_w": 0.9999999979663229,
+      "MAC_th": 0.3414769265361561,
+      "c_w_lsq": 1.406692172771838,
+      "tip_w_ratio": 1.4066495689924527,
+      "tip_th_ratio": -88.96414159990815,
+      "rms_w_rel": 6.343662578748317e-05
+    },
+    {
+      "mode": 2,
+      "f_gino_Hz": 15.259947055904892,
+      "f_sharpy_Hz": 15.226205056713319,
+      "df_pct": 0.22160478639223083,
+      "twist_sign": -1.0,
+      "MAC_full": 0.9985581833505959,
+      "MAC_w": 0.9999978778015556,
+      "MAC_th": 0.9999874224214698,
+      "c_w_lsq": -1.4392961959966941,
+      "tip_w_ratio": -1.4375545732716206,
+      "tip_th_ratio": -1.6618886568926041,
+      "rms_w_rel": 0.002096735432519736
+    },
+    {
+      "mode": 3,
+      "f_gino_Hz": 38.97417680172213,
+      "f_sharpy_Hz": 38.6147020325094,
+      "df_pct": 0.9309272124127617,
+      "twist_sign": -1.0,
+      "MAC_full": 0.9583934523927448,
+      "MAC_w": 0.9995464799317567,
+      "MAC_th": 0.9816284778563691,
+      "c_w_lsq": -1.3273701497002448,
+      "tip_w_ratio": -1.2767220174604677,
+      "tip_th_ratio": -2.337159087169051,
+      "rms_w_rel": 0.028274100965275422
+    },
+    {
+      "mode": 4,
+      "f_gino_Hz": 55.688654819742226,
+      "f_sharpy_Hz": 54.61249658703786,
+      "df_pct": 1.9705347676044276,
+      "twist_sign": -1.0,
+      "MAC_full": 0.9159854989219481,
+      "MAC_w": 0.9999739811840119,
+      "MAC_th": 0.8864149152300325,
+      "c_w_lsq": 1.4195008444434183,
+      "tip_w_ratio": 1.4132847316512345,
+      "tip_th_ratio": 0.590019569639928,
+      "rms_w_rel": 0.007240775293860281
+    }
+  ],
+  "quvlm_vs_live_q": {
+    "Q00_mean_rel_err": 0.01832153835154484,
+    "Q01_mean_rel_err": 0.00895455864914888,
+    "Q11_mean_rel_err": 0.00423672137880988
+  },
+  "findings": [
+    "Plunge MAC for bend/tors is essentially 1.0 after proper SHARPy extract \u2014 shapes match.",
+    "Twist MAC for bend mode is the weak channel (w_lsq ignores twist by design).",
+    "Quvlm GINO-basis Q matches live SHARPy freqresp projected by C within ~1\u20132% (Q00 worst).",
+    "Quvlm was built from root GOLAND dry CSV (bend 7.85 Hz) while current parity run uses 7.72 Hz \u2014 mild basis drift.",
+    "Bending V-g gap is therefore NOT from gross mode-shape mismatch of Uz; look at twist coupling + p-k vs Ass + basis C scale."
+  ]
+}

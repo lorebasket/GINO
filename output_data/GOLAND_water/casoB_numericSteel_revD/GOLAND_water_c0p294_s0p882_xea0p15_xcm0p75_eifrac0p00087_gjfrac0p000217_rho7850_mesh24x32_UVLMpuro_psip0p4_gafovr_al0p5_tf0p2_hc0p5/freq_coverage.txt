@@ -1,0 +1,3 @@
+[copertura] GOLAND_water: 220 radici
+  UVLM k_max 24.0 1/m; radici fuori 4 (V [0.5, 0.679, 0.858, 1.037]); banda preventiva chiede k fino a 305.5 -> RICALCOLARE
+  banda dai modi bagnati: 0.00-152.77 rad/s

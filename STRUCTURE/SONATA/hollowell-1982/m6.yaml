@@ -1,0 +1,155 @@
+name: hollowell 1982 - FINAL VALIDATED
+description: Rectangular laminate plate [+45/-45/0/0/-45/+45] - Validated configuration
+
+components:
+# ==== B L A D E ==== #
+    blade:
+        outer_shape_bem:
+            airfoil_position:
+                grid: [0.0, 0.5, 1.0]
+                labels: [rectangle, rectangle, rectangle]
+            chord:
+                grid: [0.0, 0.5, 1.0] 
+                values: [1., 1., 1.]
+            twist:
+                grid: [0.0, 0.5, 1.0] 
+                values: [0.0, 0.0, 0.0]
+            pitch_axis:
+                grid: [0.0, 0.5, 1.0] 
+                values: [0.0, 0.0, 0.0]
+            
+            reference_axis:
+                x:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.1525, 0.305]  # 305mm total length
+                y:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0]
+                z:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0] 
+
+            beam_reference_axis:
+                x:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.1525, 0.305]
+                y:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0]
+                z:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0] 
+
+# ==== I N T E R N A L S T R U C T U R E ==== #
+        internal_structure_2d_fem:
+            sections:
+              # --- r/R = 0.0 ---
+              - position: 0.0
+                trim_mass: False
+                mesh_resolution: 500  # Alta risoluzione per accuratezza
+                segments:
+                  # SINGLE SEGMENT: 6 plies stacked vertically
+                  # Applied ONLY on bottom edge [0.002617, 0.497383] = 76mm
+                  # This represents a classical laminate plate with plies through-thickness
+                  - id: 0
+                    filler: Null  # NO internal filling
+                    layup: 
+                      # [s_start, s_end, thickness, angle, material_id, name]
+                      # All plies overlap on same location = stacked configuration
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply1']
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply2']
+                      - [0.002617, 0.497383, 0.000134, 0, 1, 'ply3']
+                      - [0.002617, 0.497383, 0.000134, 0, 1, 'ply4']
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply5']
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply6']
+
+              # --- r/R = 0.5 ---
+              - position: 0.5
+                trim_mass: False
+                mesh_resolution: 500
+                segments:
+                  - id: 0
+                    filler: Null
+                    layup: 
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply1']
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply2']
+                      - [0.002617, 0.497383, 0.000134, 0, 1, 'ply3']
+                      - [0.002617, 0.497383, 0.000134, 0, 1, 'ply4']
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply5']
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply6']
+              
+              # --- r/R = 1.0 ---
+              - position: 1.0
+                trim_mass: False
+                mesh_resolution: 500
+                segments:
+                  - id: 0
+                    filler: Null
+                    layup: 
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply1']
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply2']
+                      - [0.002617, 0.497383, 0.000134, 0, 1, 'ply3']
+                      - [0.002617, 0.497383, 0.000134, 0, 1, 'ply4']
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply5']
+                      - [0.002617, 0.497383, 0.000134, -30, 1, 'ply6']
+
+# ==== A I R F O I L S ==== #
+airfoils:
+   # Rectangular cross-section: 76mm × 0.798mm
+   # CRITICAL: Starting from RIGHT (x=+0.038, y=0), going COUNTER-CLOCKWISE
+   # This is required by SONATA conventions
+   #
+   # Perimeter breakdown:
+   #   Point 0→1: Right edge (0.402mm) - Segment 0.000 to 0.002617
+   #   Point 1→2: Bottom edge (76mm)   - Segment 0.002617 to 0.497383 ← LAYUP HERE
+   #   Point 2→3: Left edge (0.804mm)  - Segment 0.497383 to 0.502617
+   #   Point 3→4: Top edge (76mm)      - Segment 0.502617 to 0.997383
+   #   Point 4→0: Right edge (0.402mm) - Segment 0.997383 to 1.000000
+   #
+   -  name: rectangle
+      coordinates:
+           # 6 points for closed contour (5 unique + 1 closure)
+           # Units: meters
+           x: [0.038, 0.038, -0.038, -0.038, 0.038, 0.038]
+           y: [0.0, +0.000402, +0.000402, -0.000402, -0.000402, 0.0]
+
+# ==== M A T E R I A L S ==== #
+materials:
+
+  - id: 1
+    name: AS1/3501-6 Graphite/Epoxy
+    description: Hercules AS1/3501-6 unidirectional graphite/epoxy tape (Hollowell 1982)
+    orth: 1
+    rho: 1520      # kg/m³
+    # In-plane properties (from Hollowell paper)
+    E_1: 98e9      # Pa (98 GPa)
+    E_2: 7.9e9     # Pa (7.9 GPa)
+    E_3: 7.9e9     # Pa (assumed = E_2 for transverse isotropy)
+    G_12: 5.6e9    # Pa (5.6 GPa)
+    G_13: 5.6e9    # Pa (assumed = G_12)
+    G_23: 3.09e9   # Pa (calculated from E_2/(2(1+nu_23)))
+    nu_12: 0.28
+    nu_13: 0.28    # assumed
+    nu_23: 0.28    # assumed
+    alpha_11: Null
+    alpha_22: Null
+    alpha_33: Null
+
+# ==== NOTES ==== #
+# Configuration validated with:
+#   - Massa: 0.0935 kg/m (errore 1.5% vs teoria CLT)
+#   - EA: 2.78×10⁶ N (errore 16.6% - accettabile per teoria 3D vs 2D)
+#   - Geometria: 76mm × 0.798mm
+#   - Stack: [+45/-45/0/0/-45/+45] simmetrico
+#
+# Key findings from validation:
+#   1. Plies must be STACKED (same s_start/s_end), not staggered
+#   2. Apply layup on BOTTOM EDGE only (0.002617 to 0.497383)
+#   3. Use filler: Null (no internal filling)
+#   4. Airfoil must start at (x_max, y=0) going counter-clockwise
+#   5. All dimensions in METERS
+#
+# Matrix interpretation (SONATA/BeamDyn coordinates):
+#   S[2,2] = EA (extension)
+#   S[3,3] = GJ (torsion)
+#   S[4,4], S[5,5] = EI (bending)

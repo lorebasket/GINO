@@ -1,0 +1,144 @@
+
+name: hollowell 1982
+description: nn
+
+components:
+# ==== B L A D E ==== #
+    blade:
+        outer_shape_bem:
+            airfoil_position:
+                grid: [0.0, 0.5, 1.0]                  # radial stations in % (ovunque deve comparire lo stesso!)
+                labels: [square4, square4, square4]    # airfoil labels, comes from the name of the airfoil (defined below)
+            chord:
+                grid: [0.0, 0.5, 1.0] 
+                values: [1., 1., 1.] # chord
+            twist:
+                grid: [0.0, 0.5, 1.0] 
+                values: [0.0, 0.0, 0.0]
+            pitch_axis:
+                grid: [0.0, 0.5, 1.0] 
+                values: [0.0, 0.0, 0.0]                 # pitch/chord (chord value of the section)
+            
+            # x along the span, y along the chord, z along the thickness
+            # it can introduce rotation
+            reference_axis:
+                x:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.1525, 0.305] # 0.33 length not cantilevered
+                y:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0]
+                z:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0] 
+
+            # definition of the point where the properties are calculated from
+            beam_reference_axis:
+                x:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.1525, 0.305] # 0.33 length not cantilevered
+                y:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0]
+                z:
+                    grid: [0.0, 0.5, 1.0]
+                    values: [0.0, 0.0, 0.0] 
+
+# ==== I N T E R N A L S T R U C T U R E ==== #
+        internal_structure_2d_fem:
+            sections:
+              # --- r/R = 0.0 ---
+              - position: 0.0
+                trim_mass: False
+                mesh_resolution: 1000
+                segments:
+                  - id: 0
+                    filler: 3
+                    layup: 
+                      # 6 plies stacked: [0, 0, 90, 90, 0, 0]
+                      - [0.0, 1.0, 0.000132, 0, 1, 'ply1']
+                      - [0.0, 1.0, 0.000132, 0, 1, 'ply2']
+                      - [0.0, 1.0, 0.000132, 90, 2, 'ply3']
+
+              # --- r/R = 0.5 ---
+              - position: 0.5
+                trim_mass: False
+                mesh_resolution: 1000
+                segments:
+                  - id: 0
+                    filler: 3
+                    layup: 
+                      - [0.0, 1.0, 0.000132, 0, 1, 'ply1']
+                      - [0.0, 1.0, 0.000132, 0, 1, 'ply2']
+                      - [0.0, 1.0, 0.000132, 90, 2, 'ply3']
+              
+              # --- r/R = 1.0 ---
+              - position: 1.0
+                trim_mass: False
+                mesh_resolution: 1000
+                segments:
+                  - id: 0
+                    filler: 3
+                    layup: 
+                      - [0.0, 1.0, 0.000132, 0, 1, 'ply1']
+                      - [0.0, 1.0, 0.000132, 0, 1, 'ply2']
+                      - [0.0, 1.0, 0.000132, 90, 2, 'ply3']
+
+# ==== A I R F O I L S ==== #
+airfoils:
+   # Thin rectangular cross-section (like a flat plate/beam)
+   # Width: 76mm (full chord), Height: 0.8mm (to accommodate 6 plies of 0.134mm each = 0.804mm total)
+   -  name: square4
+      coordinates:
+           # Rectangular contour: closed path around thin rectangle
+           # X from -38mm to +38mm (76mm wide), Y from -0.4mm to +0.4mm (0.8mm tall)
+           x: [0.038, 0.038, -0.038, -0.038, +0.038, 0.038]
+           y: [0.0, 0.000402, +0.000402, -0.000402, -0.000402, 0.0]
+
+# ==== M A T E R I A L S ==== #
+materials:
+
+  - id: 1
+    name: UD 0
+    description: Hercules AS1/3501-6 unidirectional graphite/epoxy tape
+    orth: 1
+    rho: 1520
+    E_1: 98e9
+    E_2: 7.9e9
+    E_3: 7.9e9
+    G_12: 5.6e9
+    G_13: 5.6e9
+    G_23: 5.6e9
+    nu_12: 0.28
+    nu_13: 0.28
+    nu_23: 0.28
+    alpha_11:  Null
+    alpha_22:  Null
+    alpha_33:  Null
+
+  - id: 2
+    name: UD 90
+    description: Hercules AS1/3501-6 unidirectional graphite/epoxy tape
+    orth: 1
+    rho: 1520
+    E_1: 98e9
+    E_2: 7.9e9
+    E_3: 7.9e9
+    G_12: 5.6e9
+    G_13: 5.6e9
+    G_23: 5.6e9
+    nu_12: 0.28
+    nu_13: 0.28
+    nu_23: 0.28
+    alpha_11:  Null
+    alpha_22:  Null
+    alpha_33:  Null
+
+  - id: 3
+    name: core
+    description: nn
+    orth: 0
+    rho: 1520
+    E: 7.9e9
+    G: 5.6e9
+    nu: 0.28

@@ -1,0 +1,11 @@
+{
+  "case": "Model2t",
+  "method": "PK + native UVLM (circulatory + kernel non-circulatory; no BEM/strip)",
+  "baseline_id": "_baseline_GINO_UVLM_only",
+  "aero_method": "UVLM",
+  "aero_b2_removal": false,
+  "pk_capytaine_matrices": false,
+  "added_mass_strip_theory": false,
+  "quvlm_npz": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/FLUID/PanelAero/Qjj/Quvlm_Model2t_water_n30c12_nm4.npz",
+  "elapsed_s": 106.47250509262085
+}

@@ -1,0 +1,3 @@
+[tippoor] mode1 tip |Ry|/|Uz|: 2.3630e-01 → 3.9148e-03
+[tippoor] mode1 mid |Ry|/|Uz_tip|: 1.6025e-01 → 2.7484e-02
+[tippoor] SHARPy tip |TH|/|W|=3.9148e-03  max|TH|/|W_tip|=3.1973e-02

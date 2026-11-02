@@ -1,0 +1,19 @@
+# FLUTTER-FSI — Python dependencies
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# NOTE: SONATA, ANBA4, and FEniCS (dolfin) are NOT pip-installable.
+#       See the "Prerequisites" section of README.md for those.
+
+# ── Core scientific stack ──────────────────────────────────────────────────────
+numpy
+scipy
+matplotlib
+pandas
+pyyaml
+
+# ── Aerodynamic panel method ───────────────────────────────────────────────────
+# DLM / VLM aerodynamic influence coefficient computation (DLR-AE)
+# https://github.com/DLR-AE/PanelAero
+PanelAero

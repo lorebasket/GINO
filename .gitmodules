@@ -1,0 +1,9 @@
+[submodule "STRUCTURE/anba4"]
+	path = STRUCTURE/anba4
+	url = https://github.com/ANBA4/anba4.git
+[submodule "FLUID/sharpy/lib/UVLM"]
+	path = FLUID/sharpy/lib/UVLM
+	url = http://github.com/imperialcollegelondon/UVLM
+[submodule "FLUID/sharpy/lib/xbeam"]
+	path = FLUID/sharpy/lib/xbeam
+	url = http://github.com/imperialcollegelondon/xbeam

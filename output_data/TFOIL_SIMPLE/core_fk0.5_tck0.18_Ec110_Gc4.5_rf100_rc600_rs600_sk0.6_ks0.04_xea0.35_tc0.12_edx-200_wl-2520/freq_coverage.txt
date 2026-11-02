@@ -1,0 +1,4 @@
+[copertura] TFOIL_SIMPLE: 1506 radici
+  BEM  griglia 0.05-1087.52 rad/s, superficie libera fino a 60.0; radici fuori griglia 0, fuori superficie libera 1135; serve fino a 912.6 rad/s -> RICALCOLARE
+  UVLM k_max 40.0 1/m; radici fuori 660 (V [1.0, 1.1, 1.2, 1.3, 1.4, 1.5]); banda preventiva chiede k fino a 912.6 -> RICALCOLARE
+  banda dai modi bagnati: 0.00-912.60 rad/s

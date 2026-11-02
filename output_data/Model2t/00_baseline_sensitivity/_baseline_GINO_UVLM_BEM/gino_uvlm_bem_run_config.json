@@ -1,0 +1,21 @@
+{
+  "case": "Model2t",
+  "method": "PK + Capytaine BEM replace + UVLM circulatory GAF",
+  "baseline_id": "_baseline_GINO_UVLM_BEM",
+  "aero_method": "UVLM",
+  "pk_bem_mode": "full",
+  "vgvf_plot_V_min_m_s": 2.0,
+  "quvlm_npz": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/FLUID/PanelAero/Qjj/Quvlm_Model2t_water_n30c12_nm4.npz",
+  "aero_b2_removal": true,
+  "pk_capytaine_matrices": true,
+  "capytaine_results_dir": "/media/lorenzo/Seagate Por1/recupero dati Linux/lorebasket/FSI/FLUID/capytaine/Model2t/results_modal_radiation",
+  "num_modes_egv": 4,
+  "num_modes_flutter_egv": 2,
+  "pk_tracking_policy": "frequency",
+  "pk_track_seed_omegas": [
+    13.0,
+    68.0
+  ],
+  "note": "UVLM circulatory aero (SHARPy linuvlm GAF table, n30c12) with UVLM apparent mass removed (aero_b2_removal) and full Capytaine A(omega), B(omega) injected as the sole non-circulatory hydro term. Twin of SHARPy --bem-mode replace --added-mass-removal gamma_dot.",
+  "elapsed_s": 31.30525040626526
+}
