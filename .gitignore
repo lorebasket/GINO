@@ -88,6 +88,7 @@ FLUID/PanelAero/panelaero_utl/old/
 # ── docs: resources + the two reference PDFs ───────────────────────────────
 /docs/*
 !/docs/resources/
+!/docs/26-04-07_thesis_Lorenzo-Valle.pdf
 !/docs/GINO – Technical Overview and Validation.pdf
 
 # ── output_data: one reference result per published case ──────────────────
