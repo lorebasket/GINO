@@ -77,6 +77,8 @@ def _build_case(
     wing_semispan: float = 6.096,
     sharpy_ei_scale: float = 1.0,
     sharpy_gj_scale: float = 1.0,
+    sharpy_psi: float = 0.0,
+    sharpy_psi_sign: tuple = (1.0, 1.0),
     sharpy_mu: float | None = None,
     sharpy_i11: float | None = None,
     sharpy_i22: float | None = None,
@@ -148,6 +150,24 @@ def _build_case(
         ws.stiffness[:, 3, 3] *= float(sharpy_gj_scale)
         ws.stiffness[:, 4, 4] *= float(sharpy_ei_scale)
         ws.stiffness[:, 5, 5] *= float(sharpy_ei_scale)
+        # EA/GA restano 1e9 dello stock: per ali grandi (EI ~ s^4) la trave diventa cedevole
+        # a taglio (03/11/2026, mappa s=64: dry f -10..-66 % rispetto a GINO). Solo rialzo,
+        # a 1e3*EI/L^2 come GINO, cosi' i casi piccoli restano identici.
+        _ga = 1e3 * float(ws.stiffness[0, 4, 4]) / float(wing_semispan) ** 2
+        for _i in range(3):
+            ws.stiffness[:, _i, _i] = np.maximum(ws.stiffness[:, _i, _i], _ga)
+    if abs(float(sharpy_psi)) > 1e-12:
+        # Accoppiamento flesso-torsionale di GINO (K[3,4] = psi*sqrt(EI*GJ)): senza, la GAF
+        # e' calcolata su modi diversi da quelli di GINO. Una voce di rigidezza per semiala,
+        # perche' le due terne locali non sono speculari: sharpy_psi_sign = (surf 0, surf 1).
+        _kbt = float(sharpy_psi) * np.sqrt(ws.stiffness[0, 3, 3] * ws.stiffness[0, 4, 4])
+        _k0 = ws.stiffness[0].copy()
+        ws.stiffness = np.stack([_k0, _k0])
+        for _i, _s in enumerate(sharpy_psi_sign):
+            ws.stiffness[_i, 3, 4] = ws.stiffness[_i, 4, 3] = float(_s) * _kbt
+        ws.elem_stiffness = np.zeros((ws.num_elem_tot,), dtype=int)
+        ws.elem_stiffness[ws.num_elem_tot // 2:] = 1
+        print(f"[sharpy-psi] psi={sharpy_psi:+.3f} K_bt={_kbt:.6g} sign={sharpy_psi_sign}")
     if sharpy_mu is not None:
         # update_mass_stiff() also hardcodes the stock air-Goland section MASS
         # (m_unit=35.71 kg/m, j_tors=8.64 kg.m). Syncing only the stiffness leaves the

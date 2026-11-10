@@ -108,6 +108,24 @@ FLUID/PanelAero/panelaero_utl/old/
 !/output_data/GOLAND_water/report/
 /output_data/GOLAND_water/report/*
 !/output_data/GOLAND_water/report/*revD.pdf
+# rev H (10/11/2026, per Pietro): report, sorgenti, casi E3 e B con l'ala immagine, repliche NACA/van Walree
+!/output_data/GOLAND_water/report/*revH.pdf
+!/output_data/GOLAND_water/report/revH/
+/output_data/GOLAND_water/report/revH/deck_revH_bozza_interna.js
+!/output_data/GOLAND_water/report/revE/
+/output_data/GOLAND_water/report/revE/*
+!/output_data/GOLAND_water/report/revE/figure_revE.py
+!/output_data/GOLAND_water/runs/
+/output_data/GOLAND_water/runs/*
+!/output_data/GOLAND_water/runs/GOLAND_water_c0p294_s1p029_*eifrac0p24_*delta*_hc*/
+!/output_data/GOLAND_water/casoB_numericSteel_revE/
+/output_data/GOLAND_water/casoB_numericSteel_revE/griglia_fine_V/
+!/output_data/GOLAND_water/testO/
+!/output_data/GOLAND_water/testP/
+/output_data/GOLAND_water/testP/letteratura/
+/output_data/GOLAND_water/testP/naca1232/_sharpy/
+!/output_data/GOLAND_water/_scripts/
+/output_data/GOLAND_water/_scripts/plot_A_general.py
 
 /output_data/TFOIL_SIMPLE/*
 !/output_data/TFOIL_SIMPLE/core_fk0.5_tck0.18_Ec110_Gc4.5_rf100_rc600_rs600_sk0.6_ks0.04_xea0.35_tc0.12_edx-200*/
@@ -133,6 +151,7 @@ FLUID/PanelAero/panelaero_utl/old/
 /output_data/**/cp_k*_allmodes.png
 /output_data/**/qmodal_pk_iterations_*.png
 /output_data/**/debug_mesh_*.png
+/output_data/**/qmodal_pk_iterations.csv
 # files > 5 MB
 /output_data/Model2t/00_baseline_sensitivity/_baseline_sharpy_deltainjection_plusbem/model2t_sharpy_eigvecs_nm4.npz
 

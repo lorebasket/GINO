@@ -119,6 +119,9 @@ def main() -> int:
     ap.add_argument("--num-modes-sharpy", type=int, default=8,
                     help="must match official Goland notebook (8 → 4 after remove_sym_modes)")
     ap.add_argument("--k-max", type=float, default=24.0, help="max k_pa = omega/V [1/m]")
+    ap.add_argument("--k-scale", type=float, default=1.0,
+                    help="moltiplica tutta la griglia k [1/m]: per un'ala scalata di s si usa 1/s, "
+                         "cosi' la tabella copre la stessa banda di frequenza ridotta k*b")
     ap.add_argument("--surface-factor", type=float, default=0.5,
                     help="0.5: two mirrored SHARPy surfaces vs GINO half-wing")
     ap.add_argument("--krylov", action="store_true",
@@ -168,6 +171,11 @@ def main() -> int:
     ap.add_argument("--sharpy-gj-scale", type=float, default=1.0,
                     help="multiplier on the SHARPy reference case's torsional "
                          "stiffness; must match GINO's GJ scale")
+    ap.add_argument("--sharpy-psi", type=float, default=0.0,
+                    help="bend-twist coupling K_bt/sqrt(EI*GJ); must match GINO's bend_twist_psi")
+    ap.add_argument("--sharpy-psi-sign", type=float, nargs=2, default=(-1.0, 1.0),
+                    help="sign of K_bt on SHARPy surface 0 and 1; (-1, +1) gives GINO frequencies "
+                         "and mirrored wings (verified 02/11/2026 against the 3 other combinations)")
     ap.add_argument("--sharpy-mu", type=float, default=None,
                     help="SHARPy reference-case mass per unit length [kg/m]; must match "
                          "GINO's mu. The template hardcodes the stock Goland 35.71 -- "
@@ -183,6 +191,9 @@ def main() -> int:
                          "for very soft wings, whose 2-deg static solve diverges.")
     ap.add_argument("--sharpy-i22", type=float, default=None)
     ap.add_argument("--sharpy-i33", type=float, default=None)
+    ap.add_argument("--image-depth", type=float, default=0.0,
+                    help="profondita' h [m] del piano dell'ala sotto la superficie libera: aggiunge "
+                         "l'ala immagine a +2h (phi = 0, alto Froude, vedi gino_bem/image_surface.py); 0 = fluido infinito")
     args = ap.parse_args()
 
     nm_g = args.num_modes_gino
@@ -197,16 +208,24 @@ def main() -> int:
     ws, *_ = _build_case(
         rho=RHO_AIR, u_inf=V_ref, alpha_deg=float(args.sharpy_alpha), M=M, N=N, M_star_fact=Ms,
         num_modes=nm_s, v_min=V_ref, v_max=V_ref, n_vel=1, velocity_list=None,
-        route=route, case_tag=f"quvlm_air{args.grid}",
+        route=route, case_tag=f"quvlm_air{args.grid}"
+        + (f"_img{args.image_depth:g}".replace(".", "p") if args.image_depth > 0 else ""),
         main_ea=args.main_ea, main_cg=args.main_cg,
         main_chord=args.main_chord, wing_semispan=args.wing_semispan,
         sharpy_ei_scale=args.sharpy_ei_scale, sharpy_gj_scale=args.sharpy_gj_scale,
+        sharpy_psi=args.sharpy_psi, sharpy_psi_sign=tuple(args.sharpy_psi_sign),
         sharpy_mu=args.sharpy_mu, sharpy_i11=args.sharpy_i11,
         sharpy_i22=args.sharpy_i22, sharpy_i33=args.sharpy_i33,
     )
     ws.config["SHARPy"]["flow"] = [
         "BeamLoader", "AerogridLoader", "StaticCoupled", "Modal", "LinearAssembler",
     ]
+    image_surfs = []
+    if args.image_depth > 0:
+        from gino_bem.image_surface import add_image_surfaces, install_patches
+        image_surfs = add_image_surfaces(ws.route + "/" + ws.case_name, float(args.image_depth))
+        install_patches(image_surfs)
+        print(f"[quvlm-goland] ala immagine a +2h, h = {args.image_depth:g} m: superfici {image_surfs}")
     rom_settings = {
         "algorithm": "mimo_rational_arnoldi",
         "r": 6,
@@ -232,6 +251,11 @@ def main() -> int:
     ws.config.write()
     data = sharpy.sharpy_main.main(["", ws.route + ws.case_name + ".sharpy"])
     ls = data.linear.linear_system
+    _ta = data.aero.timestep_info[-1]
+    for _i, _z in enumerate(_ta.zeta):
+        print(f"[quvlm-goland] superficie {_i}: z medio {_z[2].mean():+.5f} m, "
+              f"y in [{_z[1].min():+.4f}, {_z[1].max():+.4f}] m, "
+              f"Fz statica {_ta.forces[_i][2].sum():+.6g} N")
 
     # remove_sym_modes halves the retained set (2 mirrored surfaces): use the
     # actual modal size of the assembled beam, not the requested one
@@ -259,6 +283,11 @@ def main() -> int:
         y_g, W_g, TH_g, omega_g = load_gino_goland_modes(nm_g, gino_name=args.gino_name)
         y_s, W_s, TH_s, _ = sharpy_modal_displacements(data, nm_s)
         half = y_s >= -1e-9
+        for _m in range(nm_s):
+            _iL = [int(np.argmin(np.abs(y_s + _y))) for _y in y_s]
+            print(f"[quvlm-goland] simmetria modo {_m}: |W(-y)-W(y)|/|W| = "
+                  f"{np.linalg.norm(W_s[_m, _iL] - W_s[_m]) / np.linalg.norm(W_s[_m]):.2e}, "
+                  f"|TH(-y)-TH(y)|/|TH| = {np.linalg.norm(TH_s[_m, _iL] - TH_s[_m]) / np.linalg.norm(TH_s[_m]):.2e}")
         y_sh, W_sh, TH_sh = y_s[half], W_s[:, half], TH_s[:, half]
         th_sign = goland_twist_sign(
             y_sh, W_sh, TH_sh, y_g, W_g, TH_g,
@@ -286,6 +315,11 @@ def main() -> int:
             print(
                 f"[quvlm-goland]   pair g{g}-s{s}: MAC_w={mac_w:.3f} MAC_th={mac_t:.3f}"
             )
+        _df = np.abs(omega_sh[:nm_g] / omega_g[:nm_g] - 1.0)
+        print(f"[quvlm-goland] scarto frequenze secche SHARPy/GINO: {np.array2string(100 * _df, precision=2)} %")
+        if _df.max() > 0.05:
+            raise RuntimeError(f"SHARPy e GINO hanno strutture diverse (scarto {100 * _df.max():.1f} %): "
+                               "controllare massa, rigidezze e psi")
         if pair_of and min(m for _, _, m in pair_of) < 0.9:
             print("[quvlm-goland] WARNING: a pairing MAC < 0.9 — check mode ordering")
 
@@ -303,7 +337,7 @@ def main() -> int:
         np.linspace(0.01, 1.5, 30),          # flutter band: k ~ 0.45 1/m
         np.linspace(1.6, 8.0, 14),
         np.linspace(8.5, args.k_max, 12),    # high-k asymptote for the B2 fit
-    ]))
+    ])) * float(args.k_scale)
     w_phys = k_list * V_ref
     w_s = w_phys * t_ref
     dt_s = float(ls.uvlm.ss.dt)
@@ -373,7 +407,7 @@ def main() -> int:
         k_list=k_list, Q=Q,
         V_ref_m_s=V_ref, rho=RHO_AIR, qinf_ref=0.5 * RHO_AIR * V_ref ** 2,
         grid=f"M{M}N{N}Ms{Ms}", case="goland_air", nm=nm_g, C=C,
-        gino_modes_source=args.gino_name,
+        gino_modes_source=args.gino_name, image_depth=float(args.image_depth),
         surface_factor=sf, dt_scaled=dt_s, n_states=ls.uvlm.ss.states,
         num_modes_sharpy=nm_s, krylov=bool(args.krylov), krylov_r=6 if args.krylov else 0,
         projection=str(args.projection),

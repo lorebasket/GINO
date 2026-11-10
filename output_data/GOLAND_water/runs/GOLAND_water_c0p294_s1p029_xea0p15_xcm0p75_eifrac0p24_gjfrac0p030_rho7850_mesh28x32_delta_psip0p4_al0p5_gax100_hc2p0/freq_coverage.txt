@@ -1,0 +1,4 @@
+[copertura] GOLAND_water: 713 radici
+  BEM  griglia 0.05-250.00 rad/s, superficie libera fino a 250.0; radici fuori griglia 231, fuori superficie libera 231; serve fino a 476.5 rad/s -> RICALCOLARE
+  UVLM k_max 24.0 1/m; radici fuori 139 (V [0.3, 0.499, 0.699, 0.898, 1.098, 1.297]); banda preventiva chiede k fino a 1588.3 -> RICALCOLARE
+  banda dai modi bagnati: 0.00-476.49 rad/s

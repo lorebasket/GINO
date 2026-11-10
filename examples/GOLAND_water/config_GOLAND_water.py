@@ -247,7 +247,8 @@ def get_config(AnalysisConfig, FSI_path, QJJ_path):
         GJ=GJ,
         EIzz=1e2 * EIxx,
         EA=_EA,
-        GAx=_GA,
+        # GAx segue EIzz (=100 EI) con lo stesso rapporto anti-locking: serve sulle ali lunghe (caso C)
+        GAx=_GA * float(os.environ.get("GOLAND_WATER_GAX_RATIO", "1.0")),
         GAz=_GA,
 
         beam_on_shear_center=True,
