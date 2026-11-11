@@ -2,8 +2,11 @@
 
 [![License: Dual%20(GPLv3%20or%20Commercial)](https://img.shields.io/badge/License-Dual%20GPLv3%20or%20Commercial-blue.svg)](LICENSE)
 
-Developed as part of a Master's thesis at Politecnico di Torino, in collaboration with:
-Pietro Casalone (Politecnico di Torino), Davide Tagliapietra (Shickler Tagliapietra Yacht Enngineering), Luca Valsecchi (Toolspole) and Paolo Motta (Toolspole).
+Developed as part of a Master's thesis at Politecnico di Torino, under the close supervision of
+**Pietro Casalone** (Politecnico di Torino), who followed the work at every stage.
+
+External collaborators: Davide Tagliapietra (Shickler Tagliapietra Yacht Engineering), Luca Valsecchi (Toolspole)
+and Paolo Motta (Toolspole).
 
 The increasing integration of composite materials into marine lifting surfaces, such as hydrofoils
 and turbine blades, is unlocking new opportunities for weight reduction and structural efficiency.
